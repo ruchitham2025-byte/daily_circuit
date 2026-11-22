@@ -673,6 +673,8 @@ const WinScreen = ({
   const [shared, setShared] = useState<boolean>(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const [showToast, setShowToast] = useState<boolean>(false);
+  const dailyLevel = isDaily ? getDailyLevel() : null;
   const gradeStats = distribution
     ? [
         { grade: 'S', count: distribution.gradeDistribution.sPlus, style: 's-grade' },
@@ -687,13 +689,19 @@ const WinScreen = ({
     setSharing(true);
     setShareError(null);
     try {
-      const result = await shareDailyResult();
-      setShared(true);
-      setShareNotice(
-        result.alreadyShared
-          ? 'Your result was already shared to this thread.'
-          : 'Your rank and cost were posted to the thread.'
+      const result = await shareDailyResult(
+        dailyLevel?.date,
+        grade,
+        finalCost,
+        targetCost,
+        hintsUsed
       );
+      setShared(true);
+      if (result.alreadyShared) {
+        setShareNotice('Your result was already shared to this thread.');
+      } else {
+        setShareNotice('Your rank and cost were posted to the thread.');
+      }
     } catch (error) {
       console.error('Unable to share daily result:', error);
       setShareError(
@@ -704,77 +712,85 @@ const WinScreen = ({
     }
   };
 
+  useEffect(() => {
+    if (!showToast) return undefined;
+    const timer = window.setTimeout(() => setShowToast(false), 2500);
+    return () => window.clearTimeout(timer);
+  }, [showToast]);
+
   return (
-  <StateScreen name="win" eyebrow="SIGNAL ROUTED" title="CIRCUIT COMPLETE">
-    <p>Every receiver is online. Your schematic is locked in.</p>
-    <div className="grade-stamp" style={{ margin: '0 auto' }}>{grade}</div>
-    <p className={`win-grade grade-${grade.toLowerCase()}`}>GRADE {grade}</p>
-    <p className="win-cost">SPENT ${finalCost} / TARGET ${targetCost}</p>
-    <p className="win-hints-used">HINTS USED: {hintsUsed}</p>
-    {isDaily && (
-      <>
-        <p className="win-daily-streak">
-          DAILY STREAK: {dailyStreak === null ? '—' : `${dailyStreak} ${dailyStreak === 1 ? 'DAY' : 'DAYS'}`}
-        </p>
-        <div className="histogram-box win-distribution">
-          <span className="hist-title">DAILY COMMUNITY EFFICIENCY</span>
-          {distribution ? (
-            <>
-              <div
-                className="hist-bars"
-                role="img"
-                aria-label={`Daily community ranks: ${distribution.gradeDistribution.sPlus} S, ${distribution.gradeDistribution.a} A, ${distribution.gradeDistribution.b} B, ${distribution.gradeDistribution.c} C`}
-              >
-                {gradeStats.map((item) => (
-                  <div className="hist-column" key={item.grade}>
-                    <div
-                      className={`h-bar ${item.style} ${distribution.playerGrade === item.grade ? 'you' : ''}`}
-                      style={{
-                        height: `${Math.max(8, item.count / peakGradeCount * 100)}%`,
-                      }}
-                    >
-                      <span>{item.count}</span>
-                    </div>
-                    <small>{item.grade}</small>
-                    {distribution.playerGrade === item.grade && <em>YOU ARE HERE</em>}
-                  </div>
-                ))}
-              </div>
-              <p className="distribution-total">{distribution.total} daily clears</p>
-            </>
-          ) : (
-            <p className="histogram-status" role="status">
-              Community distribution unavailable.
-            </p>
-          )}
+    <main className="victory-overlay">
+      <section className="victory-card" role="dialog" aria-modal="true" aria-labelledby="win-title">
+        <div className="victory-header">
+          <div>
+            <span className="sector-tag">{isDaily ? 'DAILY CIRCUIT COMPLETE' : 'SECTOR CLEARED'}</span>
+            <h2 id="win-title">{isDaily ? `DAILY ${dailyLevel?.date ?? ''}` : 'CAMPAIGN SECTOR'}</h2>
+          </div>
+          <div className={`grade-stamp grade-${grade.toLowerCase()}`}>{grade}</div>
         </div>
-        <button
-          type="button"
-          className="reddit-submit-btn win-share-button"
-          onClick={() => void handleShare()}
-          disabled={!dailyResultSaved || sharing || shared}
-        >
-          {sharing ? 'SHARING…' : shared ? '✓ SHARED' : 'SHARE RESULT'}
-        </button>
-        {!dailyResultSaved && (
-          <p className="submission-error" role="alert">
-            Your result could not be saved, so it cannot be shared yet.
-          </p>
+
+        <p className={`win-grade grade-${grade.toLowerCase()}`}>GRADE {grade}</p>
+        <p className="win-cost">SPENT ${finalCost} / TARGET ${targetCost}</p>
+        <p className="win-hints-used">HINTS USED: {hintsUsed}</p>
+
+        {isDaily && (
+          <>
+            <p className="win-daily-streak">
+              DAILY STREAK: {dailyStreak === null ? '—' : `${dailyStreak} ${dailyStreak === 1 ? 'DAY' : 'DAYS'}`}
+            </p>
+            {distribution && (
+              <div className="win-distribution">
+                <span className="hist-title">DAILY COMMUNITY EFFICIENCY</span>
+                <div className="hist-bars" role="img" aria-label={`Daily community ranks: ${distribution.gradeDistribution.sPlus} S, ${distribution.gradeDistribution.a} A, ${distribution.gradeDistribution.b} B, ${distribution.gradeDistribution.c} C`}>
+                  {gradeStats.map((item) => (
+                    <div className="hist-column" key={item.grade}>
+                      <div className={`h-bar ${item.style} ${distribution.playerGrade === item.grade ? 'you' : ''}`} style={{ height: `${Math.max(8, item.count / peakGradeCount * 100)}%` }}><span>{item.count}</span></div>
+                      <small>{item.grade}</small>
+                    </div>
+                  ))}
+                </div>
+                <p className="distribution-total">{distribution.total} daily clears</p>
+              </div>
+            )}
+          </>
         )}
-        {shareError && <p className="submission-error" role="status">{shareError}</p>}
-        {shareNotice && <p className="submission-notice" role="status">{shareNotice}</p>}
+
+        <div className="victory-stats">
+          <div className="v-stat"><span>PARTS</span><strong>{hintsUsed === 0 ? 'PERFECT' : `${hintsUsed} HINTS`}</strong></div>
+          <div className="v-stat"><span>EFFICIENCY</span><strong>{grade === 'S' ? 'OPTIMAL' : grade === 'A' ? 'GREAT' : grade === 'B' ? 'GOOD' : 'PASS'}</strong></div>
+        </div>
+
+        {progressError && <p className="submission-error" role="alert">{progressError}</p>}
         {resultError && <p className="submission-error" role="alert">{resultError}</p>}
         {resultNotice && <p className="submission-notice" role="status">{resultNotice}</p>}
-      </>
-    )}
-    {progressError && <p className="submission-error" role="alert">{progressError}</p>}
-    {nextLevelId !== null && (
-      <ScreenButton onClick={() => onNextLevel(nextLevelId)}>NEXT LEVEL {String(nextLevelId).padStart(2, '0')}</ScreenButton>
-    )}
-    <ScreenButton onClick={() => goTo('play')}>PLAY AGAIN</ScreenButton>
-    <ScreenButton variant="secondary" onClick={() => goTo('levels')}>LEVEL SELECT</ScreenButton>
-    <ScreenButton variant="secondary" onClick={() => goTo('menu')}>MAIN MENU</ScreenButton>
-  </StateScreen>
+        {shareError && <p className="submission-error" role="status">{shareError}</p>}
+        {shareNotice && <p className="submission-notice" role="status">{shareNotice}</p>}
+
+        <div className="victory-actions">
+          {nextLevelId !== null && (
+            <button type="button" className="primary-btn" onClick={() => onNextLevel(nextLevelId)}>
+              NEXT SECTOR →
+            </button>
+          )}
+          {isDaily && (
+            <button
+              type="button"
+              className="share-btn"
+              onClick={() => void handleShare()}
+              disabled={sharing || shared}
+            >
+              {sharing ? 'SHARING…' : shared ? '✓ SHARED' : 'SHARE RESULT'}
+            </button>
+          )}
+          <button type="button" className="primary-btn" onClick={() => goTo('play')} style={{ background: 'linear-gradient(135deg, var(--copper), var(--copper-bright))' }}>
+            REPLAY
+          </button>
+          <button type="button" className="ghost-btn" onClick={() => goTo('levels')}>LEVEL SELECT</button>
+          <button type="button" className="ghost-btn" onClick={() => goTo('menu')}>MAIN MENU</button>
+        </div>
+      </section>
+      {showToast && <div className="clipboard-toast" role="status">Copied to clipboard!</div>}
+    </main>
   );
 };
 
@@ -913,6 +929,8 @@ export const PlayScreen = ({
   const winTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const winSequenceStartedRef = useRef<boolean>(false);
   const [showPreviewPill] = useState<boolean>(() => isPreviewMode());
+  const [boardSize, setBoardSize] = useState<number>(0);
+  const boardContainerRef = useRef<HTMLDivElement>(null);
   const dailyState = useSyncExternalStore(
     subscribeDailyState,
     () => getDailyState(1),
@@ -988,6 +1006,19 @@ export const PlayScreen = ({
     }
     return previews;
   }, [currentLevel, grid, selectedTool]);
+  useEffect(() => {
+    const container = boardContainerRef.current;
+    if (!container) return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const size = Math.min(entry.contentRect.width, entry.contentRect.height);
+      setBoardSize(size);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     if (startedAtRef.current === 0) {
       startedAtRef.current = getCurrentTimestamp();
@@ -1591,10 +1622,14 @@ export const PlayScreen = ({
         </div>
       </header>
 
-      <div className="board-container">
+      <div className="board-container" ref={boardContainerRef}>
         <div
           className={`pcb-board ${hazardPowered ? 'board-overload' : ''} ${winSequence ? 'win-sequence' : ''}`}
-          style={{ gridTemplateColumns: `repeat(${currentLevel.size}, minmax(0, 1fr))` }}
+          style={{
+            gridTemplateColumns: `repeat(${currentLevel.size}, minmax(0, 1fr))`,
+            width: boardSize > 0 ? `${boardSize}px` : undefined,
+            height: boardSize > 0 ? `${boardSize}px` : undefined,
+          }}
           role="grid"
           aria-label={`${currentLevel.title} circuit grid`}
         >
@@ -2020,7 +2055,7 @@ export const App = () => {
       break;
   }
 
-  return content;
+  return <div className="app-frame">{content}</div>;
 };
 
 const rootElement = document.getElementById('root') ?? document.body;
