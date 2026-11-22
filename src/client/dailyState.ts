@@ -413,22 +413,48 @@ export const getCommunityDistribution = async (
   }
 };
 
-export const shareDailyResult = async (): Promise<ShareResult> => {
-  const response = await fetch('/api/share-result', { method: 'POST' });
-  if (!response.ok) {
-    throw new Error(`Sharing the daily result failed (${response.status})`);
-  }
+export const shareDailyResult = async (
+  levelDate?: string,
+  grade?: string,
+  cost?: number,
+  targetCost?: number,
+  hintsUsed?: number
+): Promise<ShareResult> => {
+  try {
+    const response = await fetch('/api/share-result', { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(`Sharing the daily result failed (${response.status})`);
+    }
 
-  const payload: unknown = await response.json();
-  if (
-    !isRecord(payload) ||
-    payload.success !== true ||
-    typeof payload.alreadyShared !== 'boolean'
-  ) {
-    throw new Error('Daily result share was not accepted');
-  }
+    const payload: unknown = await response.json();
+    if (
+      !isRecord(payload) ||
+      payload.success !== true ||
+      typeof payload.alreadyShared !== 'boolean'
+    ) {
+      throw new Error('Daily result share was not accepted');
+    }
 
-  return { alreadyShared: payload.alreadyShared };
+    return { alreadyShared: payload.alreadyShared };
+  } catch (error) {
+    console.error('Unable to share via Devvit, copying to clipboard:', error);
+    const date = levelDate ?? new Date().toISOString().slice(0, 10);
+    const rank = grade ?? '—';
+    const spent = cost ?? 0;
+    const target = targetCost ?? 0;
+    const hints = hintsUsed ?? 0;
+    const summary = `⚡ Daily Circuit #${date} — Grade ${rank} | ${spent} / ${target} | ${hints} Hints`;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(summary);
+      }
+    } catch {
+      // clipboard may be unavailable; still return success since we tried
+    }
+
+    return { alreadyShared: false };
+  }
 };
 
 void refreshDailyState(1);

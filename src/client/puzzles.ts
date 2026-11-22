@@ -78,7 +78,7 @@ export const getDailyLevel = (now = new Date()): DailyLevel => {
   ) / 86_400_000);
   const rawDifficulty = (utcDay % 30) + 1;
   const difficulty = Math.max(6, rawDifficulty);
-  const minDailySize = Math.max(7, dailyDifficultySize(difficulty));
+  const minDailySize = Math.max(8, dailyDifficultySize(difficulty));
   const generated = generate(
     utcDay,
     minDailySize,

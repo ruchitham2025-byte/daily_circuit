@@ -425,6 +425,189 @@ const createSplitLesson = (
   };
 };
 
+const createDailyLayout = (
+  seed: number,
+  size: number,
+  difficulty: number,
+  random: Random
+): GeneratedLevel | null => {
+  const center = Math.floor(size / 2);
+  const source = position(size, center, center);
+
+  const targetCount = 2 + Math.floor(random() * 2);
+  const targets: number[] = [];
+  const targetPositions = new Set<number>([source]);
+  let attempts = 0;
+  while (targets.length < targetCount && attempts < 60) {
+    attempts += 1;
+    const row = Math.floor(random() * size);
+    const col = Math.floor(random() * size);
+    const idx = position(size, row, col);
+    const minDist = Math.abs(row - center) + Math.abs(col - center);
+    if (minDist >= 3 && !targetPositions.has(idx)) {
+      targetPositions.add(idx);
+      targets.push(idx);
+    }
+  }
+  if (targets.length < 2) return null;
+
+  const blocked = new Set<number>();
+  const hazards = new Set<number>();
+  const allReserved = new Set<number>([source, ...targets]);
+
+  const obstacleCandidates = shuffled(
+    Array.from({ length: size * size }, (_, index) => index)
+      .filter((index) =>
+        !allReserved.has(index) &&
+        adjacent(size, index).every((neighbor) => !allReserved.has(neighbor))
+      ),
+    random
+  );
+  const wallCount = Math.min(2 + Math.floor(difficulty / 8), Math.floor(size / 2));
+  const hazardCount = Math.min(1 + Math.floor(difficulty / 10), 3);
+  let obstacleIndex = 0;
+  for (let count = 0; count < wallCount; count += 1) {
+    const cell = obstacleCandidates[obstacleIndex];
+    if (cell === undefined) break;
+    obstacleIndex += 1;
+    blocked.add(cell);
+    allReserved.add(cell);
+  }
+  for (let count = 0; count < hazardCount; count += 1) {
+    const cell = obstacleCandidates[obstacleIndex];
+    if (cell === undefined) break;
+    obstacleIndex += 1;
+    hazards.add(cell);
+    allReserved.add(cell);
+  }
+
+  const routes: number[][] = [];
+  const allRouteCells = new Set<number>([source]);
+  for (const target of targets) {
+    const route = buildRoute(size, source, target, new Set([...blocked, ...hazards, ...allRouteCells]), random);
+    if (!route || route.length < 4) return null;
+    for (const cell of route) allRouteCells.add(cell);
+    routes.push(route);
+  }
+
+  if ([...hazards].some((hazard) =>
+    adjacent(size, hazard).some((neighbor) => allRouteCells.has(neighbor))
+  )) {
+    return null;
+  }
+
+  const puzzle: Puzzle = {
+    size,
+    source,
+    targets: [],
+    boosters: [],
+    walls: [...blocked],
+    hazards: [...hazards],
+  };
+  const placements = createPlacements(puzzle);
+
+  const allRouteInteriors = new Set<number>();
+  for (const route of routes) {
+    for (const cell of route.slice(1, -1)) allRouteInteriors.add(cell);
+  }
+  const boosterCount = Math.min(1 + Math.floor(difficulty / 12), 3);
+  const interiorArray = shuffled([...allRouteInteriors], random);
+  const boosters: number[] = [];
+  for (let count = 0; count < Math.min(boosterCount, interiorArray.length); count += 1) {
+    const cell = interiorArray[count];
+    if (cell === undefined) break;
+    boosters.push(cell);
+  }
+  puzzle.boosters = boosters;
+
+  for (const index of puzzle.walls) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'wall' };
+  }
+  for (const index of puzzle.hazards) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'hazard' };
+  }
+  for (const index of puzzle.boosters) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'booster', type: 4 };
+  }
+
+  const neighbors = new Map<number, Set<number>>();
+  for (const route of routes) {
+    for (let offset = 1; offset < route.length; offset += 1) {
+      const current = route[offset];
+      const previous = route[offset - 1];
+      if (current === undefined || previous === undefined) return null;
+      const currentNeighbors = neighbors.get(current) ?? new Set<number>();
+      const previousNeighbors = neighbors.get(previous) ?? new Set<number>();
+      currentNeighbors.add(previous);
+      previousNeighbors.add(current);
+      neighbors.set(current, currentNeighbors);
+      neighbors.set(previous, previousNeighbors);
+    }
+  }
+
+  const targetSet = new Set(targets);
+  for (const [index, adjacentCells] of neighbors) {
+    if (index === source || targetSet.has(index)) continue;
+    if (puzzle.boosters.includes(index)) continue;
+
+    const requiredDirections = [...adjacentCells].map((neighbor) =>
+      directionBetween(size, index, neighbor)
+    );
+    const options = shuffled(
+      componentOptions(puzzle, placements, index)
+        .filter((option) =>
+          requiredDirections.every((direction) => option.connections.includes(direction))
+        ),
+      random
+    );
+    const option = options[0];
+    if (!option) return null;
+    placements[index] = option.placement;
+  }
+
+  puzzle.targets = targets.map((index) => ({ index, voltage: 1 }));
+  for (const target of targets) {
+    const placement = placements[target];
+    if (placement) placements[target] = { ...placement, fixed: 'target', type: 4 };
+  }
+
+  const initialEvaluation = evaluate(puzzle, placements);
+  if (initialEvaluation.hazardPowered) return null;
+  const evaluatedTargets = targets.map((index) => ({
+    index,
+    voltage: initialEvaluation.voltages.get(index) ?? 0,
+  }));
+  if (evaluatedTargets.some((target) => target.voltage < 1)) return null;
+  puzzle.targets = evaluatedTargets;
+
+  const solution = solve(puzzle);
+  if (!solution) return null;
+  const solvedEvaluation = evaluate(puzzle, solution);
+  if (
+    solvedEvaluation.hazardPowered ||
+    solvedEvaluation.receivers.some((receiver) => !receiver.met)
+  ) {
+    return null;
+  }
+
+  const solutionParts = solution.filter(
+    (placement) => placement.fixed === 'none' && placement.type > 0
+  ).length;
+  if (solutionParts < 7 || solvedEvaluation.hardwareCost < 85) return null;
+
+  return {
+    ...puzzle,
+    seed,
+    difficulty,
+    lesson: 'advanced',
+    placements: solution,
+    targetCost: solvedEvaluation.hardwareCost,
+  };
+};
+
 export const generate = (
   seed: number,
   size: number,
@@ -438,8 +621,19 @@ export const generate = (
     throw new Error('Difficulty must be an integer from 1 to 30.');
   }
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+  const dailyAttempts = MAX_ATTEMPTS * 3;
+  const maxAttempts = difficulty >= 6 ? dailyAttempts : MAX_ATTEMPTS;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const random = seededRandom(seed + attempt * 0x9e3779b9);
+    const level = difficulty >= 6
+      ? createDailyLayout(seed, size, difficulty, random)
+      : createLessonLayout(seed, size, difficulty, random);
+    if (level) return level;
+  }
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const random = seededRandom(seed + attempt * 0x9e3779b9 + 0x12345);
     const level = createLessonLayout(seed, size, difficulty, random);
     if (level) return level;
   }
