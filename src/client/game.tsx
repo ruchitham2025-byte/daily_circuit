@@ -21,6 +21,7 @@ import {
 import {
   getCommunityDistribution,
   getDailyState,
+  isPreviewMode,
   refreshDailyState,
   shareDailyResult,
   submitScore,
@@ -144,6 +145,100 @@ type ScreenProps = {
   goTo: GoToScreen;
 };
 
+/* ============================================================
+   CUSTOM SVG ICONS — distinct silhouettes for circuit nodes
+   ============================================================ */
+const SourceIcon = (): ReactNode => (
+  <svg viewBox="0 0 44 44" fill="none" aria-hidden="true">
+    <circle cx="22" cy="22" r="16" fill="rgba(255 179 71 / 12%)" />
+    <path
+      d="M22 8 L26 20 L18 20 L22 8 Z"
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M22 36 L18 24 L26 24 L22 36 Z"
+      fill="rgba(255 179 71 / 35%)"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <circle cx="22" cy="22" r="3" fill="#fff" opacity="0.8" />
+  </svg>
+);
+
+const TargetIcon = ({ fillPercent }: { fillPercent: number }): ReactNode => {
+  const clampedFill = Math.max(0, Math.min(100, fillPercent));
+  const radius = 16;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - clampedFill / 100);
+  return (
+    <svg viewBox="0 0 44 44" fill="none" aria-hidden="true">
+      <circle
+        cx="22"
+        cy="22"
+        r={radius}
+        fill="none"
+        stroke="rgba(62 240 200 / 12%)"
+        strokeWidth="3"
+      />
+      <circle
+        cx="22"
+        cy="22"
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+        transform="rotate(-90 22 22)"
+        style={{ transition: 'stroke-dashoffset 400ms ease' }}
+      />
+      <circle cx="22" cy="22" r="7" fill="currentColor" opacity="0.18" />
+      <circle cx="22" cy="22" r="4" fill="currentColor" opacity="0.6" />
+      {clampedFill >= 100 && (
+        <circle cx="22" cy="22" r="9" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.4">
+          <animate attributeName="r" from="9" to="18" dur="0.8s" repeatCount="indefinite" />
+          <animate attributeName="opacity" from="0.5" to="0" dur="0.8s" repeatCount="indefinite" />
+        </circle>
+      )}
+    </svg>
+  );
+};
+
+const BoosterIcon = (): ReactNode => (
+  <svg viewBox="0 0 44 44" fill="none" aria-hidden="true">
+    <circle cx="22" cy="22" r="14" fill="rgba(91 156 245 / 10%)" stroke="currentColor" strokeWidth="2" />
+    <path
+      d="M22 10 L19 20 L25 20 L22 10 Z"
+      fill="currentColor"
+      opacity="0.7"
+    />
+    <path
+      d="M22 34 L25 24 L19 24 L22 34 Z"
+      fill="currentColor"
+    />
+    <circle cx="22" cy="22" r="3" fill="#fff" opacity="0.7" />
+  </svg>
+);
+
+const HazardIcon = (): ReactNode => (
+  <svg viewBox="0 0 44 44" fill="none" aria-hidden="true">
+    <polygon
+      points="22,8 36,32 8,32"
+      fill="rgba(255 90 122 / 12%)"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+    />
+    <rect x="20.5" y="16" width="3" height="9" rx="1" fill="currentColor" />
+    <circle cx="22" cy="29" r="1.8" fill="currentColor" />
+  </svg>
+);
+
 type BootScreenProps = {
   onSkip: () => void;
   onAnimationEnd: () => void;
@@ -211,9 +306,7 @@ const MenuScreen = ({ goTo, streak, onPlayDaily, onOpenLevels }: MenuScreenProps
     <main className="menu-screen-shell">
       <div className="menu-background-grid" aria-hidden="true" />
       <section className="menu-screen-content" aria-labelledby="menu-screen-title">
-        <span className="menu-eyebrow">
-          DAILY PUZZLE // {dailyLevel.date}
-        </span>
+        <span className="menu-eyebrow">DAILY PUZZLE // {dailyLevel.date}</span>
         <h1 id="menu-screen-title" className="menu-screen-title">DAILY CIRCUIT</h1>
         <p className="menu-screen-tagline">ROUTE THE CURRENT. OUTSMART THE GRID.</p>
         <div className="menu-streak-panel" aria-label="Daily player streak">
@@ -270,7 +363,7 @@ const LevelsScreen = ({
       </p>
     )}
     {progress.status === 'loading' && (
-      <p className="campaign-status" role="status">Syncing Redis campaign progress…</p>
+      <p className="campaign-status" role="status">Syncing campaign progress…</p>
     )}
     <div className="campaign-path" aria-label="30 campaign sectors">
       {levels.map((level) => {
@@ -615,6 +708,7 @@ const WinScreen = ({
   return (
   <StateScreen name="win" eyebrow="SIGNAL ROUTED" title="CIRCUIT COMPLETE">
     <p>Every receiver is online. Your schematic is locked in.</p>
+    <div className="grade-stamp" style={{ margin: '0 auto' }}>{grade}</div>
     <p className={`win-grade grade-${grade.toLowerCase()}`}>GRADE {grade}</p>
     <p className="win-cost">SPENT ${finalCost} / TARGET ${targetCost}</p>
     <p className="win-hints-used">HINTS USED: {hintsUsed}</p>
@@ -819,6 +913,7 @@ export const PlayScreen = ({
   );
   const winTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const winSequenceStartedRef = useRef<boolean>(false);
+  const [showPreviewPill, setShowPreviewPill] = useState<boolean>(false);
   const dailyState = useSyncExternalStore(
     subscribeDailyState,
     () => getDailyState(1),
@@ -917,6 +1012,10 @@ export const PlayScreen = ({
     animationFrame = window.requestAnimationFrame(updateTimer);
     return () => window.cancelAnimationFrame(animationFrame);
   }, [winTime]);
+
+  useEffect(() => {
+    setShowPreviewPill(isPreviewMode());
+  }, []);
 
   useEffect(() => {
     const canvas = sparkCanvasRef.current;
@@ -1430,19 +1529,22 @@ export const PlayScreen = ({
   };
 
   return (
-    <main className="cyber-shell game-shell">
+    <main className="game-shell">
       <canvas
         ref={sparkCanvasRef}
         className="spark-overlay"
         aria-hidden="true"
       />
+      {showPreviewPill && (
+        <span className="preview-pill" aria-label="Preview mode">PREVIEW MODE</span>
+      )}
       <header className="hud-header">
         <div className="hud-top">
           <div className="game-brand">
             <span className="sector-tag">
               {currentLevel.mode === 'daily'
-                ? `DAILY CIRCUIT / ${currentLevel.date}`
-                : `CAMPAIGN / SECTOR ${String(currentLevel.id).padStart(2, '0')}`}
+                ? `DAILY / ${currentLevel.date}`
+                : `SECTOR ${String(currentLevel.id).padStart(2, '0')}`}
             </span>
             <h1 className="hud-title">{currentLevel.title}</h1>
           </div>
@@ -1469,21 +1571,21 @@ export const PlayScreen = ({
 
         <div className="hud-metrics">
           <div className="metric-box">
-            <span className="metric-label">LIVE COST</span>
-            <span className={`metric-val spent-target ${grade === 'S' ? 'optimal' : grade === 'C' ? 'danger' : 'warn'}`}>
-              SPENT ${finalCost} / TARGET ${currentLevel.targetCost}
+            <span className="metric-label">COST</span>
+            <span className={`metric-val ${grade === 'S' ? 'optimal' : grade === 'C' ? 'danger' : 'warn'}`}>
+              ${finalCost}/${currentLevel.targetCost}
             </span>
           </div>
           <div className="metric-box">
-            <span className="metric-label">NODES ONLINE</span>
-            <span className="metric-val">{targetsSatisfied} / {currentLevel.targets.length}</span>
+            <span className="metric-label">NODES</span>
+            <span className="metric-val">{targetsSatisfied}/{currentLevel.targets.length}</span>
           </div>
           <div className="metric-box">
             <span className="metric-label">MOVES</span>
             <span className="metric-val">{movesUsed}</span>
           </div>
           <div className="metric-box">
-            <span className="metric-label">SPEEDRUN CLOCK</span>
+            <span className="metric-label">TIME</span>
             <span
               ref={timerDisplayRef}
               className={`metric-val ${solved ? 'optimal' : ''}`}
@@ -1494,116 +1596,138 @@ export const PlayScreen = ({
         </div>
       </header>
 
-      <div
-        className={`pcb-board ${hazardPowered ? 'board-overload' : ''} ${winSequence ? 'win-sequence' : ''}`}
-        style={{ gridTemplateColumns: `repeat(${currentLevel.size}, minmax(0, 1fr))` }}
-        role="grid"
-        aria-label={`${currentLevel.title} circuit grid`}
-      >
-        {grid.map((cell, index) => {
-          const voltage = voltages.get(index) ?? 0;
-          const isPowered = voltage > 0;
-          const cellLinks = tileConnections.get(index) ?? [];
-          const receiver = receivers.find((result) => result.index === index);
-          const targetMet = cell.fixed === 'target' && (receiver?.met ?? false);
-          const receiverFill = receiver
-            ? Math.min(100, Math.max(0, receiver.voltage / receiver.requiredVoltage * 100))
-            : 0;
-          const coordinate = `${String.fromCharCode(65 + Math.floor(index / currentLevel.size))}${(index % currentLevel.size) + 1}`;
-          const previewVoltage = previewVoltages.get(index);
-          return (
-            <button
-              type="button"
-              role="gridcell"
-              key={index}
-              ref={(element) => {
-                if (element) {
-                  tileElementsRef.current.set(index, element);
-                } else {
-                  tileElementsRef.current.delete(index);
-                }
-              }}
-              className={`pcb-tile ${cell.fixed} ${isPowered ? `powered voltage-${Math.min(5, Math.max(1, voltage))}` : ''} ${cell.fixed === 'hazard' && isPowered ? 'hazard-powered' : ''} ${targetMet ? 'target-met' : ''} ${hintSuggestion?.index === index ? 'hint-ghost-tile' : ''} ${hintFailure?.index === index ? 'hint-wrong-tile' : ''}`}
-              aria-label={`${coordinate}, ${cell.fixed === 'none' ? `${cell.type > 0 ? 'component' : 'empty'}, ${voltage} volts${previewVoltage === undefined ? '' : `, ghost preview ${previewVoltage} volts`}${hintSuggestion?.index === index ? `, hint type ${hintSuggestion.type}, rotation ${hintSuggestion.rotation}` : ''}${hintFailure?.index === index ? ', suggested tile to undo' : ''}` : cell.fixed}`}
-              aria-disabled={cell.fixed !== 'none'}
-              onClick={(event) => handleTileClick(index, event.currentTarget)}
-            >
-              <span className="coord-mark">{coordinate}</span>
-              {cell.fixed === 'none' && cell.type > 0 && (
-                <svg className="trace-svg" viewBox="0 0 44 44" aria-hidden="true">
-                  {DIRECTIONS.map((direction) => (
-                    cellLinks.includes(direction.direction) && (
-                      <line
-                        key={direction.direction}
-                        x1="22"
-                        y1="22"
-                        x2={22 + direction.column * 22}
-                        y2={22 + direction.row * 22}
-                        className={isPowered ? `trace-pulse voltage-${Math.min(5, Math.max(1, voltage))}` : 'trace-base'}
-                        style={{
-                          animationDelay: winSequence
-                            ? `${(winDistances.get(index) ?? 0) * winDelayPerHop}ms`
-                            : undefined,
-                        }}
-                      />
-                    )
-                  ))}
-                  <circle cx="22" cy="22" r="5" className="trace-joint" />
-                </svg>
-              )}
-              {cell.fixed === 'source' && <div className="hw-node source-core"><span>⚡</span><small>CORE</small></div>}
-              {cell.fixed === 'booster' && <div className={`hw-node booster-core ${isPowered ? 'active' : ''}`}><span>◈</span><small>RESET +{BOOSTER_VOLTAGE}V</small></div>}
-              {cell.fixed === 'target' && (
-                <div className={`hw-node target-core ${targetMet ? 'online' : ''}`}>
+      <div className="board-container">
+        <div
+          className={`pcb-board ${hazardPowered ? 'board-overload' : ''} ${winSequence ? 'win-sequence' : ''}`}
+          style={{ gridTemplateColumns: `repeat(${currentLevel.size}, minmax(0, 1fr))` }}
+          role="grid"
+          aria-label={`${currentLevel.title} circuit grid`}
+        >
+          {grid.map((cell, index) => {
+            const voltage = voltages.get(index) ?? 0;
+            const isPowered = voltage > 0;
+            const cellLinks = tileConnections.get(index) ?? [];
+            const receiver = receivers.find((result) => result.index === index);
+            const targetMet = cell.fixed === 'target' && (receiver?.met ?? false);
+            const receiverFill = receiver
+              ? Math.min(100, Math.max(0, receiver.voltage / receiver.requiredVoltage * 100))
+              : 0;
+            const coordinate = `${String.fromCharCode(65 + Math.floor(index / currentLevel.size))}${(index % currentLevel.size) + 1}`;
+            const previewVoltage = previewVoltages.get(index);
+            return (
+              <button
+                type="button"
+                role="gridcell"
+                key={index}
+                ref={(element) => {
+                  if (element) {
+                    tileElementsRef.current.set(index, element);
+                  } else {
+                    tileElementsRef.current.delete(index);
+                  }
+                }}
+                className={`pcb-tile ${cell.fixed} ${isPowered ? `powered voltage-${Math.min(5, Math.max(1, voltage))}` : ''} ${cell.fixed === 'hazard' && isPowered ? 'hazard-powered' : ''} ${cell.fixed === 'booster' && isPowered ? 'powered' : ''} ${targetMet ? 'target-met' : ''} ${hintSuggestion?.index === index ? 'hint-ghost-tile' : ''} ${hintFailure?.index === index ? 'hint-wrong-tile' : ''}`}
+                aria-label={`${coordinate}, ${cell.fixed === 'none' ? `${cell.type > 0 ? 'component' : 'empty'}, ${voltage} volts${previewVoltage === undefined ? '' : `, ghost preview ${previewVoltage} volts`}${hintSuggestion?.index === index ? `, hint type ${hintSuggestion.type}, rotation ${hintSuggestion.rotation}` : ''}${hintFailure?.index === index ? ', suggested tile to undo' : ''}` : cell.fixed}`}
+                aria-disabled={cell.fixed !== 'none'}
+                onClick={(event) => handleTileClick(index, event.currentTarget)}
+              >
+                <span className="coord-mark">{coordinate}</span>
+                {cell.fixed === 'none' && cell.type > 0 && (
+                  <svg className="trace-svg" viewBox="0 0 44 44" aria-hidden="true">
+                    {DIRECTIONS.map((direction) => (
+                      cellLinks.includes(direction.direction) && (
+                        <g key={direction.direction}>
+                          {isPowered && (
+                            <line
+                              x1="22"
+                              y1="22"
+                              x2={22 + direction.column * 22}
+                              y2={22 + direction.row * 22}
+                              className="trace-glow"
+                              style={{
+                                animationDelay: winSequence
+                                  ? `${(winDistances.get(index) ?? 0) * winDelayPerHop}ms`
+                                  : undefined,
+                              }}
+                            />
+                          )}
+                          <line
+                            x1="22"
+                            y1="22"
+                            x2={22 + direction.column * 22}
+                            y2={22 + direction.row * 22}
+                            className={isPowered ? `trace-pulse voltage-${Math.min(5, Math.max(1, voltage))}` : 'trace-base'}
+                            style={{
+                              animationDelay: winSequence
+                                ? `${(winDistances.get(index) ?? 0) * winDelayPerHop}ms`
+                                : undefined,
+                            }}
+                          />
+                        </g>
+                      )
+                    ))}
+                    <circle cx="22" cy="22" r="5" className="trace-joint" />
+                  </svg>
+                )}
+                {cell.fixed === 'source' && (
+                  <div className="hw-node source-core">
+                    <SourceIcon />
+                    <small>5V</small>
+                  </div>
+                )}
+                {cell.fixed === 'booster' && (
+                  <div className={`hw-node booster-core ${isPowered ? 'active' : ''}`}>
+                    <BoosterIcon />
+                    <small>+{BOOSTER_VOLTAGE}V</small>
+                  </div>
+                )}
+                {cell.fixed === 'target' && (
+                  <div className={`hw-node target-core ${targetMet ? 'online' : ''}`}>
+                    <TargetIcon fillPercent={receiverFill} />
+                    <small>{receiver?.requiredVoltage ?? cell.requiredVoltage ?? 1}V</small>
+                  </div>
+                )}
+                {cell.fixed === 'hazard' && (
+                  <div className="hw-node hazard-core">
+                    <HazardIcon />
+                  </div>
+                )}
+                {cell.fixed === 'none' && cell.type > 0 && isPowered && <span className="v-badge">{voltage}V</span>}
+                {cell.fixed !== 'none' && cell.fixed !== 'wall' && isPowered && <span className="v-badge">{voltage}V</span>}
+                {cell.fixed === 'none' && cell.type === 0 && previewVoltage !== undefined && (
+                  <span className="v-badge ghost-voltage">~{previewVoltage}V</span>
+                )}
+                {hintSuggestion?.index === index && (
                   <span
-                    className="receiver-ring"
-                    style={{
-                      background: `conic-gradient(var(--cyan) ${receiverFill}%, rgb(69 242 208 / 12%) ${receiverFill}% 100%)`,
-                    }}
+                    className="hint-ghost"
                     aria-hidden="true"
                   >
-                    <span className="receiver-icon">◎</span>
+                    <svg className="hint-ghost-svg" viewBox="0 0 44 44">
+                      {hintSuggestion.connections.map((directionIndex) => {
+                        const direction = DIRECTIONS.find(
+                          (candidate) => candidate.direction === directionIndex
+                        );
+                        if (!direction) return null;
+                        return (
+                          <line
+                            key={direction.direction}
+                            x1="22"
+                            y1="22"
+                            x2={22 + direction.column * 22}
+                            y2={22 + direction.row * 22}
+                          />
+                        );
+                      })}
+                      <circle cx="22" cy="22" r="5" />
+                    </svg>
+                    <small>T{hintSuggestion.type} · R{hintSuggestion.rotation}</small>
                   </span>
-                  <small>NEED {receiver?.requiredVoltage ?? cell.requiredVoltage ?? 1}V</small>
-                </div>
-              )}
-              {cell.fixed === 'hazard' && <div className="hw-node hazard-core"><span>☢</span><small>TRAP</small></div>}
-              {cell.fixed === 'none' && cell.type > 0 && isPowered && <span className="v-badge">{voltage}V</span>}
-              {cell.fixed !== 'none' && isPowered && <span className="v-badge">{voltage}V</span>}
-              {cell.fixed === 'none' && cell.type === 0 && previewVoltage !== undefined && (
-                <span className="v-badge ghost-voltage">~{previewVoltage}V</span>
-              )}
-              {hintSuggestion?.index === index && (
-                <span
-                  className="hint-ghost"
-                  aria-hidden="true"
-                >
-                  <svg className="hint-ghost-svg" viewBox="0 0 44 44">
-                    {hintSuggestion.connections.map((directionIndex) => {
-                      const direction = DIRECTIONS.find(
-                        (candidate) => candidate.direction === directionIndex
-                      );
-                      if (!direction) return null;
-                      return (
-                        <line
-                          key={direction.direction}
-                          x1="22"
-                          y1="22"
-                          x2={22 + direction.column * 22}
-                          y2={22 + direction.row * 22}
-                        />
-                      );
-                    })}
-                    <circle cx="22" cy="22" r="5" />
-                  </svg>
-                  <small>T{hintSuggestion.type} · R{hintSuggestion.rotation}</small>
-                </span>
-              )}
-            </button>
-          );
-        })}
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <p className="target-guidance">Target = cheapest known solution. Spend less for a higher rank.</p>
 
       <div className="game-bottom-toolbar">
         <section className="component-deck" aria-label="Circuit components">
@@ -1611,11 +1735,10 @@ export const PlayScreen = ({
           <button type="button" className={`deck-card ${selectedTool === 2 ? 'selected' : ''}`} onClick={() => setSelectedTool(2)} aria-pressed={selectedTool === 2}><span className="card-icon">┗</span><span className="card-name">Vector</span><span className="card-cost">$15</span></button>
           <button type="button" className={`deck-card ${selectedTool === 3 ? 'selected' : ''}`} onClick={() => setSelectedTool(3)} aria-pressed={selectedTool === 3}><span className="card-icon">┣</span><span className="card-name">Splitter</span><span className="card-cost">$25</span></button>
           <button type="button" className="deck-card action-card" onClick={undo} disabled={history.length === 0}><span className="card-icon">↶</span><span className="card-name">Undo</span><span className="card-cost">{history.length}</span></button>
-          <button type="button" className="deck-card action-card danger" onClick={restartLevel}><span className="card-icon">↺</span><span className="card-name">Restart</span><span className="card-cost">RST</span></button>
+          <button type="button" className="deck-card action-card danger" onClick={restartLevel}><span className="card-icon">↺</span><span className="card-name">Reset</span><span className="card-cost">RST</span></button>
         </section>
 
         <nav className="game-utility-row" aria-label="Game tools">
-          <span className="legend-strip"><span>⚡ Core {SOURCE_VOLTAGE}V</span><span>· −1V / tile</span><span>◈ Booster +{BOOSTER_VOLTAGE}V</span><span>☢ Overload</span></span>
           <button
             type="button"
             onClick={() => void requestHint()}

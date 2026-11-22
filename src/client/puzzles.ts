@@ -76,10 +76,12 @@ export const getDailyLevel = (now = new Date()): DailyLevel => {
     now.getUTCMonth(),
     now.getUTCDate()
   ) / 86_400_000);
-  const difficulty = (utcDay % 30) + 1;
+  const rawDifficulty = (utcDay % 30) + 1;
+  const difficulty = Math.max(6, rawDifficulty);
+  const minDailySize = Math.max(7, dailyDifficultySize(difficulty));
   const generated = generate(
     utcDay,
-    dailyDifficultySize(difficulty),
+    minDailySize,
     difficulty
   );
   if (!generated) {

@@ -32,7 +32,7 @@ export type CommunityDistribution = {
 export type DailyStateSnapshot =
   | { status: 'loading' }
   | { status: 'error' }
-  | { status: 'ready'; data: DailyStateData };
+  | { status: 'ready'; data: DailyStateData; preview: boolean };
 
 export type ScoreResult = {
   streak: number;
@@ -47,18 +47,154 @@ const loadingSnapshot: DailyStateSnapshot = { status: 'loading' };
 const snapshots = new Map<number, DailyStateSnapshot>();
 const listeners = new Set<() => void>();
 
+const STORAGE_KEY = 'daily-circuit:local-stats';
+const PREVIEW_FLAG_KEY = 'daily-circuit:preview-mode';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+export const isPreviewMode = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false;
+    return window.sessionStorage.getItem(PREVIEW_FLAG_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const setPreviewMode = (): void => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(PREVIEW_FLAG_KEY, 'true');
+    }
+  } catch {
+    // ignore storage errors
+  }
+};
+
+type LocalStats = {
+  streak: number;
+  totalPuzzles: number;
+  totalCost: number;
+  bestCost: number | null;
+  bestTime: number | null;
+  gradeCounts: GradeDistribution;
+  completions: number;
+};
+
+const emptyLocalStats: LocalStats = {
+  streak: 0,
+  totalPuzzles: 0,
+  totalCost: 0,
+  bestCost: null,
+  bestTime: null,
+  gradeCounts: { sPlus: 0, a: 0, b: 0, c: 0 },
+  completions: 0,
+};
+
+const loadLocalStats = (): LocalStats => {
+  try {
+    if (typeof window === 'undefined') return { ...emptyLocalStats };
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...emptyLocalStats };
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return { ...emptyLocalStats };
+    return {
+      streak: isFiniteNumber(parsed.streak) ? parsed.streak : 0,
+      totalPuzzles: isFiniteNumber(parsed.totalPuzzles) ? parsed.totalPuzzles : 0,
+      totalCost: isFiniteNumber(parsed.totalCost) ? parsed.totalCost : 0,
+      bestCost: parsed.bestCost === null || isFiniteNumber(parsed.bestCost) ? parsed.bestCost : null,
+      bestTime: parsed.bestTime === null || isFiniteNumber(parsed.bestTime) ? parsed.bestTime : null,
+      gradeCounts: isRecord(parsed.gradeCounts)
+        ? {
+            sPlus: isFiniteNumber(parsed.gradeCounts.sPlus) ? parsed.gradeCounts.sPlus : 0,
+            a: isFiniteNumber(parsed.gradeCounts.a) ? parsed.gradeCounts.a : 0,
+            b: isFiniteNumber(parsed.gradeCounts.b) ? parsed.gradeCounts.b : 0,
+            c: isFiniteNumber(parsed.gradeCounts.c) ? parsed.gradeCounts.c : 0,
+          }
+        : { sPlus: 0, a: 0, b: 0, c: 0 },
+      completions: isFiniteNumber(parsed.completions) ? parsed.completions : 0,
+    };
+  } catch {
+    return { ...emptyLocalStats };
+  }
+};
+
+const saveLocalStats = (stats: LocalStats): void => {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const gradeForCost = (cost: number, targetCost: number): 'S' | 'A' | 'B' | 'C' => {
+  if (cost <= targetCost) return 'S';
+  if (cost <= targetCost * 1.15) return 'A';
+  if (cost <= targetCost * 1.3) return 'B';
+  return 'C';
+};
+
+const fieldForGrade = (grade: 'S' | 'A' | 'B' | 'C'): keyof GradeDistribution => {
+  if (grade === 'S') return 'sPlus';
+  if (grade === 'A') return 'a';
+  if (grade === 'B') return 'b';
+  return 'c';
+};
+
+const seedMockDistribution = (): GradeDistribution => {
+  const seed = Math.floor(Date.now() / 86_400_000) * 7919;
+  return {
+    sPlus: 128 + (seed % 73),
+    a: 214 + (seed % 51),
+    b: 89 + (seed % 37),
+    c: 34 + (seed % 19),
+  };
+};
+
+const buildLocalState = (stats: LocalStats): DailyStateData => {
+  const mockDist = seedMockDistribution();
+  const gradeDist: GradeDistribution = {
+    sPlus: mockDist.sPlus + stats.gradeCounts.sPlus,
+    a: mockDist.a + stats.gradeCounts.a,
+    b: mockDist.b + stats.gradeCounts.b,
+    c: mockDist.c + stats.gradeCounts.c,
+  };
+  const grades: { grade: 'S' | 'A' | 'B' | 'C'; count: number }[] = [
+    { grade: 'S', count: stats.gradeCounts.sPlus },
+    { grade: 'A', count: stats.gradeCounts.a },
+    { grade: 'B', count: stats.gradeCounts.b },
+    { grade: 'C', count: stats.gradeCounts.c },
+  ];
+  grades.sort((l, r) => r.count - l.count);
+  const top = grades[0];
+  return {
+    totalCompletions: stats.completions + mockDist.sPlus + mockDist.a + mockDist.b + mockDist.c,
+    globalAverageCost: stats.totalPuzzles > 0 ? stats.totalCost / stats.totalPuzzles : null,
+    gradeDistribution: gradeDist,
+    playerCompletions: stats.completions,
+    playerStats: {
+      streak: stats.streak,
+      totalPuzzles: stats.totalPuzzles,
+      averageCost: stats.totalPuzzles > 0 ? stats.totalCost / stats.totalPuzzles : null,
+      personalBest: stats.bestCost,
+      personalBests: [
+        { levelId: 1, cost: stats.bestCost },
+        { levelId: 2, cost: null },
+        { levelId: 3, cost: null },
+      ],
+      bestTimeSeconds: stats.bestTime,
+      efficiencyRating: top && top.count > 0 ? top.grade : '—',
+    },
+  };
+};
+
 const parseDailyState = (value: unknown): DailyStateData | undefined => {
-  if (
-    !isRecord(value) ||
-    !isRecord(value.gradeDistribution) ||
-    !isRecord(value.playerStats)
-  ) {
+  if (!isRecord(value) || !isRecord(value.gradeDistribution) || !isRecord(value.playerStats)) {
     return undefined;
   }
 
@@ -150,10 +286,12 @@ export const refreshDailyState = async (levelId: number): Promise<void> => {
     if (!data) {
       throw new Error('Daily telemetry response was invalid');
     }
-    snapshots.set(levelId, { status: 'ready', data });
+    snapshots.set(levelId, { status: 'ready', data, preview: false });
   } catch (error) {
-    console.error('Unable to load daily telemetry:', error);
-    snapshots.set(levelId, { status: 'error' });
+    console.error('Unable to load daily telemetry, using local fallback:', error);
+    setPreviewMode();
+    const local = loadLocalStats();
+    snapshots.set(levelId, { status: 'ready', data: buildLocalState(local), preview: true });
   }
 
   notifyListeners();
@@ -169,71 +307,110 @@ export const submitScore = async (
     durationSeconds: number;
   }
 ): Promise<ScoreResult> => {
-  const response = await fetch('/api/submit-score', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(score),
-  });
+  try {
+    const response = await fetch('/api/submit-score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(score),
+    });
 
-  if (!response.ok) {
-    throw new Error(`Score submission failed (${response.status})`);
+    if (!response.ok) {
+      throw new Error(`Score submission failed (${response.status})`);
+    }
+
+    const payload: unknown = await response.json();
+    if (!isRecord(payload) || payload.success !== true || !isFiniteNumber(payload.streak)) {
+      throw new Error('Score submission was not accepted');
+    }
+
+    const integrationWarnings = Array.isArray(payload.integrationWarnings)
+      ? payload.integrationWarnings.filter(
+          (warning): warning is string => typeof warning === 'string'
+        )
+      : [];
+
+    return { streak: payload.streak, integrationWarnings };
+  } catch (error) {
+    console.error('Unable to submit score, saving locally:', error);
+    setPreviewMode();
+    const stats = loadLocalStats();
+    const targetCost = score.targetCost ?? 100;
+    const grade = gradeForCost(score.cost, targetCost);
+    stats.completions += 1;
+    stats.totalPuzzles += 1;
+    stats.totalCost += score.cost;
+    stats.gradeCounts[fieldForGrade(grade)] += 1;
+    if (stats.bestCost === null || score.cost < stats.bestCost) {
+      stats.bestCost = score.cost;
+    }
+    if (stats.bestTime === null || score.durationSeconds < stats.bestTime) {
+      stats.bestTime = score.durationSeconds;
+    }
+    stats.streak += 1;
+    saveLocalStats(stats);
+    void refreshDailyState(score.levelId);
+    return { streak: stats.streak, integrationWarnings: [] };
   }
-
-  const payload: unknown = await response.json();
-  if (!isRecord(payload) || payload.success !== true || !isFiniteNumber(payload.streak)) {
-    throw new Error('Score submission was not accepted');
-  }
-
-  const integrationWarnings = Array.isArray(payload.integrationWarnings)
-    ? payload.integrationWarnings.filter(
-        (warning): warning is string => typeof warning === 'string'
-      )
-    : [];
-
-  return { streak: payload.streak, integrationWarnings };
 };
 
 export const getCommunityDistribution = async (
   levelId: number
 ): Promise<CommunityDistribution> => {
-  const response = await fetch(
-    `/api/community-distribution?levelId=${levelId}`
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Community distribution request failed (${response.status})`
+  try {
+    const response = await fetch(
+      `/api/community-distribution?levelId=${levelId}`
     );
-  }
+    if (!response.ok) {
+      throw new Error(
+        `Community distribution request failed (${response.status})`
+      );
+    }
 
-  const payload: unknown = await response.json();
-  if (
-    !isRecord(payload) ||
-    payload.success !== true ||
-    !isFiniteNumber(payload.total) ||
-    !isRecord(payload.gradeDistribution) ||
-    !isFiniteNumber(payload.gradeDistribution.sPlus) ||
-    !isFiniteNumber(payload.gradeDistribution.a) ||
-    !isFiniteNumber(payload.gradeDistribution.b) ||
-    !isFiniteNumber(payload.gradeDistribution.c) ||
-    (payload.playerGrade !== null &&
-      payload.playerGrade !== 'S' &&
-      payload.playerGrade !== 'A' &&
-      payload.playerGrade !== 'B' &&
-      payload.playerGrade !== 'C')
-  ) {
-    throw new Error('Community distribution response was invalid');
-  }
+    const payload: unknown = await response.json();
+    if (
+      !isRecord(payload) ||
+      payload.success !== true ||
+      !isFiniteNumber(payload.total) ||
+      !isRecord(payload.gradeDistribution) ||
+      !isFiniteNumber(payload.gradeDistribution.sPlus) ||
+      !isFiniteNumber(payload.gradeDistribution.a) ||
+      !isFiniteNumber(payload.gradeDistribution.b) ||
+      !isFiniteNumber(payload.gradeDistribution.c) ||
+      (payload.playerGrade !== null &&
+        payload.playerGrade !== 'S' &&
+        payload.playerGrade !== 'A' &&
+        payload.playerGrade !== 'B' &&
+        payload.playerGrade !== 'C')
+    ) {
+      throw new Error('Community distribution response was invalid');
+    }
 
-  return {
-    total: payload.total,
-    gradeDistribution: {
-      sPlus: payload.gradeDistribution.sPlus,
-      a: payload.gradeDistribution.a,
-      b: payload.gradeDistribution.b,
-      c: payload.gradeDistribution.c,
-    },
-    playerGrade: payload.playerGrade,
-  };
+    return {
+      total: payload.total,
+      gradeDistribution: {
+        sPlus: payload.gradeDistribution.sPlus,
+        a: payload.gradeDistribution.a,
+        b: payload.gradeDistribution.b,
+        c: payload.gradeDistribution.c,
+      },
+      playerGrade: payload.playerGrade,
+    };
+  } catch (error) {
+    console.error('Unable to load community distribution, using mock:', error);
+    setPreviewMode();
+    const stats = loadLocalStats();
+    const mockDist = seedMockDistribution();
+    return {
+      total: mockDist.sPlus + mockDist.a + mockDist.b + mockDist.c + stats.completions,
+      gradeDistribution: {
+        sPlus: mockDist.sPlus + stats.gradeCounts.sPlus,
+        a: mockDist.a + stats.gradeCounts.a,
+        b: mockDist.b + stats.gradeCounts.b,
+        c: mockDist.c + stats.gradeCounts.c,
+      },
+      playerGrade: null,
+    };
+  }
 };
 
 export const shareDailyResult = async (): Promise<ShareResult> => {
