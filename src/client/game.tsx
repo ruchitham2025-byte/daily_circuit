@@ -39,7 +39,6 @@ import {
   DIRECTIONS,
   evaluate,
   BOOSTER_VOLTAGE,
-  SOURCE_VOLTAGE,
   type FixedType,
   type Placement,
   type Puzzle,
@@ -913,7 +912,7 @@ export const PlayScreen = ({
   );
   const winTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const winSequenceStartedRef = useRef<boolean>(false);
-  const [showPreviewPill, setShowPreviewPill] = useState<boolean>(false);
+  const [showPreviewPill] = useState<boolean>(() => isPreviewMode());
   const dailyState = useSyncExternalStore(
     subscribeDailyState,
     () => getDailyState(1),
@@ -1012,10 +1011,6 @@ export const PlayScreen = ({
     animationFrame = window.requestAnimationFrame(updateTimer);
     return () => window.cancelAnimationFrame(animationFrame);
   }, [winTime]);
-
-  useEffect(() => {
-    setShowPreviewPill(isPreviewMode());
-  }, []);
 
   useEffect(() => {
     const canvas = sparkCanvasRef.current;
