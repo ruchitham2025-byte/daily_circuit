@@ -1,0 +1,852 @@
+[
+  {
+    "id": 1,
+    "mode": "campaign",
+    "title": "VOLTAGE DECAY",
+    "date": "SECTOR 01",
+    "targetCost": 10,
+    "difficulty": "TIER 1",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 22,
+        "voltage": 3
+      }
+    ],
+    "boosters": [],
+    "walls": [],
+    "hazards": []
+  },
+  {
+    "id": 2,
+    "mode": "campaign",
+    "title": "SIGNAL BOOST",
+    "date": "SECTOR 02",
+    "targetCost": 30,
+    "difficulty": "TIER 2",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 24,
+        "voltage": 3
+      }
+    ],
+    "boosters": [
+      18
+    ],
+    "walls": [],
+    "hazards": []
+  },
+  {
+    "id": 3,
+    "mode": "campaign",
+    "title": "SPLITTER ARRAY",
+    "date": "SECTOR 03",
+    "targetCost": 45,
+    "difficulty": "TIER 3",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 5,
+        "voltage": 2
+      },
+      {
+        "index": 9,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [],
+    "hazards": []
+  },
+  {
+    "id": 4,
+    "mode": "campaign",
+    "title": "HAZARD ZONE",
+    "date": "SECTOR 04",
+    "targetCost": 10,
+    "difficulty": "TIER 4",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 14,
+        "voltage": 3
+      }
+    ],
+    "boosters": [],
+    "walls": [],
+    "hazards": [
+      21
+    ]
+  },
+  {
+    "id": 5,
+    "mode": "campaign",
+    "title": "TARGET BUDGET",
+    "date": "SECTOR 05",
+    "targetCost": 45,
+    "difficulty": "TIER 5",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 5,
+        "voltage": 2
+      },
+      {
+        "index": 9,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      24
+    ],
+    "hazards": []
+  },
+  {
+    "id": 6,
+    "mode": "campaign",
+    "title": "PHASE SHIFT",
+    "date": "SECTOR 06",
+    "targetCost": 10,
+    "difficulty": "TIER 6",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 14,
+        "voltage": 3
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      6,
+      24
+    ],
+    "hazards": [
+      20
+    ]
+  },
+  {
+    "id": 7,
+    "mode": "campaign",
+    "title": "CROSSTALK",
+    "date": "SECTOR 07",
+    "targetCost": 150,
+    "difficulty": "TIER 7",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 4,
+        "voltage": 1
+      },
+      {
+        "index": 21,
+        "voltage": 3
+      },
+      {
+        "index": 15,
+        "voltage": 3
+      }
+    ],
+    "boosters": [
+      11
+    ],
+    "walls": [
+      5,
+      19
+    ],
+    "hazards": [
+      2
+    ]
+  },
+  {
+    "id": 8,
+    "mode": "campaign",
+    "title": "NIGHT GRID",
+    "date": "SECTOR 08",
+    "targetCost": 10,
+    "difficulty": "TIER 8",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 10,
+        "voltage": 3
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      8,
+      9
+    ],
+    "hazards": [
+      1
+    ]
+  },
+  {
+    "id": 9,
+    "mode": "campaign",
+    "title": "DEEP CURRENT",
+    "date": "SECTOR 09",
+    "targetCost": 10,
+    "difficulty": "TIER 9",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 22,
+        "voltage": 3
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      20,
+      0
+    ],
+    "hazards": [
+      24
+    ]
+  },
+  {
+    "id": 10,
+    "mode": "campaign",
+    "title": "GHOST SIGNAL",
+    "date": "SECTOR 10",
+    "targetCost": 10,
+    "difficulty": "TIER 10",
+    "size": 5,
+    "source": 12,
+    "targets": [
+      {
+        "index": 10,
+        "voltage": 3
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      22,
+      4
+    ],
+    "hazards": [
+      23
+    ]
+  },
+  {
+    "id": 11,
+    "mode": "campaign",
+    "title": "BLACKOUT",
+    "date": "SECTOR 11",
+    "targetCost": 20,
+    "difficulty": "TIER 11",
+    "size": 6,
+    "source": 21,
+    "targets": [
+      {
+        "index": 18,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      16,
+      33
+    ],
+    "hazards": [
+      23
+    ]
+  },
+  {
+    "id": 12,
+    "mode": "campaign",
+    "title": "ZERO DAY",
+    "date": "SECTOR 12",
+    "targetCost": 100,
+    "difficulty": "TIER 12",
+    "size": 6,
+    "source": 21,
+    "targets": [
+      {
+        "index": 30,
+        "voltage": 4
+      },
+      {
+        "index": 35,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      27,
+      24
+    ],
+    "walls": [
+      25,
+      3,
+      11
+    ],
+    "hazards": [
+      8,
+      6
+    ]
+  },
+  {
+    "id": 13,
+    "mode": "campaign",
+    "title": "STATIC BLOOM",
+    "date": "SECTOR 13",
+    "targetCost": 20,
+    "difficulty": "TIER 13",
+    "size": 6,
+    "source": 21,
+    "targets": [
+      {
+        "index": 18,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      32,
+      2
+    ],
+    "hazards": [
+      7
+    ]
+  },
+  {
+    "id": 14,
+    "mode": "campaign",
+    "title": "REDLINE",
+    "date": "SECTOR 14",
+    "targetCost": 10,
+    "difficulty": "TIER 14",
+    "size": 6,
+    "source": 21,
+    "targets": [
+      {
+        "index": 23,
+        "voltage": 3
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      7,
+      12,
+      34
+    ],
+    "hazards": [
+      24
+    ]
+  },
+  {
+    "id": 15,
+    "mode": "campaign",
+    "title": "ION STORM",
+    "date": "SECTOR 15",
+    "targetCost": 20,
+    "difficulty": "TIER 15",
+    "size": 6,
+    "source": 21,
+    "targets": [
+      {
+        "index": 3,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      23,
+      6,
+      30
+    ],
+    "hazards": [
+      26
+    ]
+  },
+  {
+    "id": 16,
+    "mode": "campaign",
+    "title": "DARK MATTER",
+    "date": "SECTOR 16",
+    "targetCost": 185,
+    "difficulty": "TIER 16",
+    "size": 7,
+    "source": 24,
+    "targets": [
+      {
+        "index": 46,
+        "voltage": 1
+      },
+      {
+        "index": 6,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      19,
+      18
+    ],
+    "walls": [
+      27,
+      12,
+      11
+    ],
+    "hazards": [
+      22,
+      4
+    ]
+  },
+  {
+    "id": 17,
+    "mode": "campaign",
+    "title": "OVERDRIVE",
+    "date": "SECTOR 17",
+    "targetCost": 20,
+    "difficulty": "TIER 17",
+    "size": 7,
+    "source": 24,
+    "targets": [
+      {
+        "index": 27,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      42,
+      10,
+      3
+    ],
+    "hazards": [
+      14
+    ]
+  },
+  {
+    "id": 18,
+    "mode": "campaign",
+    "title": "COLD START",
+    "date": "SECTOR 18",
+    "targetCost": 20,
+    "difficulty": "TIER 18",
+    "size": 7,
+    "source": 24,
+    "targets": [
+      {
+        "index": 3,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      21,
+      12,
+      13
+    ],
+    "hazards": [
+      7,
+      34
+    ]
+  },
+  {
+    "id": 19,
+    "mode": "campaign",
+    "title": "NEXUS",
+    "date": "SECTOR 19",
+    "targetCost": 20,
+    "difficulty": "TIER 19",
+    "size": 7,
+    "source": 24,
+    "targets": [
+      {
+        "index": 3,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      22,
+      19,
+      45
+    ],
+    "hazards": [
+      48,
+      0
+    ]
+  },
+  {
+    "id": 20,
+    "mode": "campaign",
+    "title": "PHANTOM TRACE",
+    "date": "SECTOR 20",
+    "targetCost": 20,
+    "difficulty": "TIER 20",
+    "size": 7,
+    "source": 24,
+    "targets": [
+      {
+        "index": 45,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      4,
+      28,
+      19
+    ],
+    "hazards": [
+      13,
+      7
+    ]
+  },
+  {
+    "id": 21,
+    "mode": "campaign",
+    "title": "AFTERGLOW",
+    "date": "SECTOR 21",
+    "targetCost": 95,
+    "difficulty": "TIER 21",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 58,
+        "voltage": 2
+      },
+      {
+        "index": 22,
+        "voltage": 4
+      },
+      {
+        "index": 11,
+        "voltage": 1
+      }
+    ],
+    "boosters": [
+      30,
+      52
+    ],
+    "walls": [
+      33,
+      61,
+      41,
+      27
+    ],
+    "hazards": [
+      54,
+      0,
+      63
+    ]
+  },
+  {
+    "id": 22,
+    "mode": "campaign",
+    "title": "SINGULARITY",
+    "date": "SECTOR 22",
+    "targetCost": 30,
+    "difficulty": "TIER 22",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 4,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      40,
+      50,
+      17,
+      62
+    ],
+    "hazards": [
+      14,
+      41
+    ]
+  },
+  {
+    "id": 23,
+    "mode": "campaign",
+    "title": "ECHO CHAMBER",
+    "date": "SECTOR 23",
+    "targetCost": 20,
+    "difficulty": "TIER 23",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 39,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      34,
+      3,
+      42,
+      18
+    ],
+    "hazards": [
+      5,
+      1
+    ]
+  },
+  {
+    "id": 24,
+    "mode": "campaign",
+    "title": "VOID RUNNER",
+    "date": "SECTOR 24",
+    "targetCost": 175,
+    "difficulty": "TIER 24",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 19,
+        "voltage": 2
+      },
+      {
+        "index": 7,
+        "voltage": 3
+      }
+    ],
+    "boosters": [
+      31,
+      37,
+      23
+    ],
+    "walls": [
+      49,
+      10,
+      53,
+      34
+    ],
+    "hazards": [
+      25,
+      4,
+      33
+    ]
+  },
+  {
+    "id": 25,
+    "mode": "campaign",
+    "title": "NIGHT SHIFT",
+    "date": "SECTOR 25",
+    "targetCost": 160,
+    "difficulty": "TIER 25",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 59,
+        "voltage": 2
+      },
+      {
+        "index": 55,
+        "voltage": 4
+      }
+    ],
+    "boosters": [
+      47,
+      37,
+      35
+    ],
+    "walls": [
+      1,
+      20,
+      2,
+      49
+    ],
+    "hazards": [
+      23,
+      33,
+      5
+    ]
+  },
+  {
+    "id": 26,
+    "mode": "campaign",
+    "title": "QUANTUM LOOP",
+    "date": "SECTOR 26",
+    "targetCost": 195,
+    "difficulty": "TIER 26",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 71,
+        "voltage": 4
+      },
+      {
+        "index": 36,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      70,
+      60,
+      39
+    ],
+    "walls": [
+      24,
+      51,
+      20,
+      34
+    ],
+    "hazards": [
+      0,
+      54,
+      75
+    ]
+  },
+  {
+    "id": 27,
+    "mode": "campaign",
+    "title": "LAST MILE",
+    "date": "SECTOR 27",
+    "targetCost": 275,
+    "difficulty": "TIER 27",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 56,
+        "voltage": 2
+      },
+      {
+        "index": 24,
+        "voltage": 1
+      },
+      {
+        "index": 7,
+        "voltage": 1
+      }
+    ],
+    "boosters": [
+      13,
+      31,
+      49
+    ],
+    "walls": [
+      29,
+      5,
+      43,
+      42
+    ],
+    "hazards": [
+      54,
+      80,
+      64
+    ]
+  },
+  {
+    "id": 28,
+    "mode": "campaign",
+    "title": "CORE MEMORY",
+    "date": "SECTOR 28",
+    "targetCost": 30,
+    "difficulty": "TIER 28",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 4,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      70,
+      33,
+      77,
+      56
+    ],
+    "hazards": [
+      11,
+      73
+    ]
+  },
+  {
+    "id": 29,
+    "mode": "campaign",
+    "title": "FINAL RELAY",
+    "date": "SECTOR 29",
+    "targetCost": 95,
+    "difficulty": "TIER 29",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 57,
+        "voltage": 4
+      },
+      {
+        "index": 19,
+        "voltage": 4
+      },
+      {
+        "index": 53,
+        "voltage": 4
+      }
+    ],
+    "boosters": [
+      20,
+      52,
+      48
+    ],
+    "walls": [
+      73,
+      45,
+      23,
+      71
+    ],
+    "hazards": [
+      24,
+      2,
+      5
+    ]
+  },
+  {
+    "id": 30,
+    "mode": "campaign",
+    "title": "CIRCUIT BREAKER",
+    "date": "SECTOR 30",
+    "targetCost": 135,
+    "difficulty": "TIER 30",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 67,
+        "voltage": 4
+      },
+      {
+        "index": 72,
+        "voltage": 1
+      }
+    ],
+    "boosters": [
+      46,
+      39,
+      58
+    ],
+    "walls": [
+      36,
+      6,
+      1,
+      2
+    ],
+    "hazards": [
+      79,
+      70,
+      43
+    ]
+  }
+]

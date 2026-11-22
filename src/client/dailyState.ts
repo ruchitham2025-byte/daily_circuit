@@ -59,7 +59,7 @@ const isFiniteNumber = (value: unknown): value is number =>
 export const isPreviewMode = (): boolean => {
   try {
     if (typeof window === 'undefined') return false;
-    return window.sessionStorage.getItem(PREVIEW_FLAG_KEY) === 'true';
+    return import.meta.env.DEV || !navigator.onLine || window.sessionStorage.getItem(PREVIEW_FLAG_KEY) === 'true';
   } catch {
     return false;
   }
@@ -76,6 +76,7 @@ const setPreviewMode = (): void => {
 };
 
 type LocalStats = {
+  lastDay?: number;
   streak: number;
   totalPuzzles: number;
   totalCost: number;
@@ -103,6 +104,7 @@ const loadLocalStats = (): LocalStats => {
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) return { ...emptyLocalStats };
     return {
+      ...(isFiniteNumber(parsed.lastDay) ? {lastDay:parsed.lastDay} : {}),
       streak: isFiniteNumber(parsed.streak) ? parsed.streak : 0,
       totalPuzzles: isFiniteNumber(parsed.totalPuzzles) ? parsed.totalPuzzles : 0,
       totalCost: isFiniteNumber(parsed.totalCost) ? parsed.totalCost : 0,
@@ -276,7 +278,8 @@ export const refreshDailyState = async (levelId: number): Promise<void> => {
   notifyListeners();
 
   try {
-    const response = await fetch(`/api/daily-state?levelId=${levelId}`);
+    if (isPreviewMode()) throw new Error('Local session');
+    const response = await fetch(`/api/daily-state?levelId=${levelId}`, { signal: AbortSignal.timeout(4000) });
     if (!response.ok) {
       throw new Error(`Daily telemetry request failed (${response.status})`);
     }
@@ -287,8 +290,7 @@ export const refreshDailyState = async (levelId: number): Promise<void> => {
       throw new Error('Daily telemetry response was invalid');
     }
     snapshots.set(levelId, { status: 'ready', data, preview: false });
-  } catch (error) {
-    console.error('Unable to load daily telemetry, using local fallback:', error);
+  } catch {
     setPreviewMode();
     const local = loadLocalStats();
     snapshots.set(levelId, { status: 'ready', data: buildLocalState(local), preview: true });
@@ -308,7 +310,9 @@ export const submitScore = async (
   }
 ): Promise<ScoreResult> => {
   try {
+    if (isPreviewMode()) throw new Error('Local session');
     const response = await fetch('/api/submit-score', {
+      signal: AbortSignal.timeout(4000),
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(score),
@@ -330,8 +334,7 @@ export const submitScore = async (
       : [];
 
     return { streak: payload.streak, integrationWarnings };
-  } catch (error) {
-    console.error('Unable to submit score, saving locally:', error);
+  } catch {
     setPreviewMode();
     const stats = loadLocalStats();
     const targetCost = score.targetCost ?? 100;
@@ -346,7 +349,9 @@ export const submitScore = async (
     if (stats.bestTime === null || score.durationSeconds < stats.bestTime) {
       stats.bestTime = score.durationSeconds;
     }
-    stats.streak += 1;
+    const day = Math.floor(Date.now() / 86400000);
+    if (stats.lastDay !== day) stats.streak = stats.lastDay === day - 1 ? stats.streak + 1 : 1;
+    stats.lastDay = day;
     saveLocalStats(stats);
     void refreshDailyState(score.levelId);
     return { streak: stats.streak, integrationWarnings: [] };

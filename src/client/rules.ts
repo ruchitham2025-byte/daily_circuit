@@ -45,6 +45,7 @@ export const DIRECTIONS: readonly Direction[] = [
   { row: 0, column: -1, direction: 3, opposite: 1 },
 ];
 
+export const names = ['Eraser', 'Conduit', 'Corner', 'Splitter'];
 export const SOURCE_VOLTAGE = 5;
 export const BOOSTER_VOLTAGE = 5;
 const COMPONENT_COSTS: Record<number, number> = {

@@ -1,10 +1,7 @@
-import { generate, type GeneratedLevel } from './generator.ts';
-import { campaignSectorTitle } from './sectorProgress.ts';
+import catalog from './sectors.json' with { type: 'json' };
 import type { Puzzle } from './rules.ts';
-
 export const DAILY_LEVEL_ID = 31;
 export const CAMPAIGN_LEVEL_COUNT = 30;
-
 export type DailyLevel = Puzzle & {
   id: number;
   mode: 'daily' | 'campaign';
@@ -13,93 +10,94 @@ export type DailyLevel = Puzzle & {
   targetCost: number;
   difficulty: string;
 };
-
-const campaignSize = (level: number): number =>
-  level <= 5 ? 5 : Math.min(10, 5 + Math.floor((level - 6) / 5));
-
-const dailyDifficultySize = (difficulty: number): number =>
-  Math.min(10, 5 + Math.floor((difficulty - 1) / 5));
-
-const toDailyLevel = (
-  generated: GeneratedLevel,
-  id: number,
-  mode: DailyLevel['mode'],
-  title: string,
-  date: string
-): DailyLevel => ({
-  id,
-  mode,
-  title,
-  date,
-  targetCost: generated.targetCost,
-  difficulty: `TIER ${generated.difficulty}`,
-  size: generated.size,
-  source: generated.source,
-  targets: generated.targets,
-  boosters: generated.boosters,
-  walls: generated.walls,
-  hazards: generated.hazards,
-});
-
-let campaignCache: DailyLevel[] | undefined;
-const dailyLevelCache = new Map<string, DailyLevel>();
-
-export const getCampaignLevels = (): DailyLevel[] => {
-  if (campaignCache) return campaignCache;
-
-  campaignCache = Array.from({ length: CAMPAIGN_LEVEL_COUNT }, (_, index) => {
-    const id = index + 1;
-    const generated = generate(0x44430000 + id, campaignSize(id), id);
-    if (!generated) {
-      throw new Error(`Unable to generate campaign sector ${id}.`);
+const sectors: DailyLevel[] = catalog.map((level) => ({
+  ...level,
+  mode: 'campaign',
+}));
+export const getCampaignLevels = () => sectors;
+export function dailyLayout(now = new Date()) {
+  const day = Math.floor(now.getTime() / 86400000);
+  let seed = day >>> 0;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const transform = (i: number) => {
+    let x = i % 6,
+      y = Math.floor(i / 6);
+    if (day % 8 >= 4) x = 5 - x;
+    for (let n = 0; n < day % 4; n++) {
+      [x, y] = [5 - y, x];
     }
-
-    return toDailyLevel(
-      generated,
-      id,
-      'campaign',
-      campaignSectorTitle(id),
-      `SECTOR ${String(id).padStart(2, '0')}`
-    );
-  });
-
-  return campaignCache;
-};
-
-export const getDailyLevel = (now = new Date()): DailyLevel => {
-  const date = now.toISOString().slice(0, 10);
-  const cachedLevel = dailyLevelCache.get(date);
-  if (cachedLevel) return cachedLevel;
-
-  const utcDay = Math.floor(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate()
-  ) / 86_400_000);
-  const rawDifficulty = (utcDay % 30) + 1;
-  const difficulty = Math.max(6, rawDifficulty);
-  const minDailySize = Math.max(8, dailyDifficultySize(difficulty));
-  const generated = generate(
-    utcDay,
-    minDailySize,
-    difficulty
+    return y * 6 + x;
+  };
+  const top = day % 3 === 0 ? 4 : 5,
+    bottom = day % 5 < 2 ? 30 : 35;
+  const upper = [12, 13, 14, 15, 9, 3, 4, ...(top === 5 ? [5] : [])];
+  const lower = [
+    15,
+    21,
+    27,
+    ...(bottom === 30 ? [26, 25, 24, 30] : [28, 29, 35]),
+  ];
+  const used = new Set([...upper, ...lower]);
+  const available = Array.from({ length: 36 }, (_, i) => i).filter(
+    (i) => !used.has(i)
   );
-  if (!generated) {
-    throw new Error(`Unable to generate the daily circuit for ${date}.`);
+  for (let i = available.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [available[i], available[j]] = [available[j]!, available[i]!];
   }
-
-  const dailyLevel = toDailyLevel(
-    generated,
-    DAILY_LEVEL_ID,
-    'daily',
-    'DAILY CIRCUIT',
-    date
-  );
-  dailyLevelCache.set(date, dailyLevel);
-  return dailyLevel;
-};
-
-export const getLevelById = (id: number): DailyLevel | undefined =>
-  id === DAILY_LEVEL_ID
-    ? getDailyLevel()
-    : getCampaignLevels().find((level) => level.id === id);
+  const fixed = [12, 15, 27, top, bottom];
+  const hazards = available
+    .filter((i) =>
+      fixed.every(
+        (j) =>
+          Math.abs((i % 6) - (j % 6)) +
+            Math.abs(Math.floor(i / 6) - Math.floor(j / 6)) >
+          1
+      )
+    )
+    .slice(0, 2);
+  const level: DailyLevel = {
+    size: 6,
+    id: 31,
+    title: 'Daily Circuit',
+    mode: 'daily',
+    date: now.toISOString().slice(0, 10),
+    difficulty: 'STANDARD',
+    source: transform(12),
+    boosters: [15, 27].map(transform),
+    targets: [
+      { index: transform(top), voltage: top === 5 ? 1 : 2 },
+      { index: transform(bottom), voltage: bottom === 30 ? 1 : 2 },
+    ],
+    walls: available
+      .filter((i) => !hazards.includes(i))
+      .slice(0, 3)
+      .map(transform),
+    hazards: hazards.map(transform),
+    targetCost: 0,
+  };
+  const directions = (a: number, b: number) =>
+    b === a - 6 ? 0 : b === a + 1 ? 1 : b === a + 6 ? 2 : 3;
+  const solution = new Map<number, { type: number; rotation: number }>();
+  for (const path of [upper, lower])
+    for (let j = 1; j < path.length - 1; j++) {
+      const i = path[j]!;
+      if (fixed.includes(i)) continue;
+      const cell = transform(i),
+        a = directions(cell, transform(path[j - 1]!)),
+        b = directions(cell, transform(path[j + 1]!));
+      const straight = Math.abs(a - b) === 2;
+      solution.set(cell, {
+        type: straight ? 1 : 2,
+        rotation: straight ? a % 2 : (a + 1) % 4 === b ? a : b,
+      });
+      level.targetCost += straight ? 10 : 15;
+    }
+  return { level, solution };
+}
+export const getDailyLevel = (now = new Date()) => dailyLayout(now).level;
+export const getLevelById = (id: number) =>
+  id === 31 ? getDailyLevel() : sectors.find((l) => l.id === id);

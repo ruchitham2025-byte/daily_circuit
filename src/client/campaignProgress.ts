@@ -84,7 +84,8 @@ export const refreshCampaignProgress = async (): Promise<void> => {
   notifyListeners();
 
   try {
-    const response = await fetch('/api/campaign-progress');
+    if (import.meta.env.DEV || !navigator.onLine) throw new Error('Local session');
+    const response = await fetch('/api/campaign-progress', {signal:AbortSignal.timeout(4000)});
     if (!response.ok) {
       throw new Error(`Campaign progress request failed (${response.status})`);
     }
@@ -122,8 +123,7 @@ export const refreshCampaignProgress = async (): Promise<void> => {
     };
     saveLocalProgress(data);
     snapshot = { status: 'ready', data };
-  } catch (error) {
-    console.error('Unable to load campaign progress, using local fallback:', error);
+  } catch {
     const local = loadLocalProgress();
     snapshot = { status: 'ready', data: local };
   }
@@ -136,7 +136,9 @@ export const recordCampaignCompletion = async (
   grade: CampaignGrade
 ): Promise<void> => {
   try {
+    if (import.meta.env.DEV || !navigator.onLine) throw new Error('Local session');
     const response = await fetch('/api/campaign-progress', {
+      signal:AbortSignal.timeout(4000),
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ levelId, grade }),
@@ -155,8 +157,7 @@ export const recordCampaignCompletion = async (
     if (snapshot.status !== 'ready') {
       throw new Error('Campaign completion saved, but progress could not be refreshed');
     }
-  } catch (error) {
-    console.error('Unable to save campaign completion to server, saving locally:', error);
+  } catch {
     const local = loadLocalProgress();
     const previousBest = local.bestGrades[levelId];
     const previousRank = previousBest ? GRADE_ORDER.indexOf(previousBest) : -1;
