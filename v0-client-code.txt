@@ -1,0 +1,4334 @@
+﻿
+=== FILE: src\client\hooks\useCounter.ts ===
+
+import { useCallback, useEffect, useState } from 'react';
+import type {
+  InitResponse,
+  IncrementResponse,
+  DecrementResponse,
+} from '../../shared/api';
+
+interface CounterState {
+  count: number;
+  username: string | null;
+  loading: boolean;
+}
+
+export const useCounter = () => {
+  const [state, setState] = useState<CounterState>({
+    count: 0,
+    username: null,
+    loading: true,
+  });
+  const [postId, setPostId] = useState<string | null>(null);
+
+  // fetch initial data
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const res = await fetch('/api/init');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: InitResponse = await res.json();
+        if (data.type !== 'init') throw new Error('Unexpected response');
+        setState({
+          count: data.count,
+          username: data.username,
+          loading: false,
+        });
+        setPostId(data.postId);
+      } catch (err) {
+        console.error('Failed to init counter', err);
+        setState((prev) => ({ ...prev, loading: false }));
+      }
+    };
+    void init();
+  }, []);
+
+  const update = useCallback(
+    async (action: 'increment' | 'decrement') => {
+      if (!postId) {
+        console.error('No postId â€“ cannot update counter');
+        return;
+      }
+      try {
+        const res = await fetch(`/api/${action}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: IncrementResponse | DecrementResponse = await res.json();
+        setState((prev) => ({ ...prev, count: data.count }));
+      } catch (err) {
+        console.error(`Failed to ${action}`, err);
+      }
+    },
+    [postId]
+  );
+
+  const increment = useCallback(() => update('increment'), [update]);
+  const decrement = useCallback(() => update('decrement'), [update]);
+
+  return {
+    ...state,
+    increment,
+    decrement,
+  } as const;
+};
+
+
+=== FILE: src\client\audio.ts ===
+
+type Sound =
+  | 'place'
+  | 'rotate'
+  | 'receiver'
+  | 'hazard'
+  | 'hint'
+  | 'win'
+  | 'laser';
+
+let audioContext: AudioContext | undefined;
+let soundEnabled = true;
+
+try {
+  if (typeof window !== 'undefined') {
+    const savedSoundSetting = window.sessionStorage.getItem('daily-circuit:sound-enabled');
+    if (savedSoundSetting !== null) {
+      soundEnabled = savedSoundSetting === 'true';
+    }
+  }
+} catch (error) {
+  console.error('Unable to restore sound setting:', error);
+}
+
+export const getSoundEnabled = (): boolean => soundEnabled;
+
+export const setSoundEnabled = (enabled: boolean): void => {
+  soundEnabled = enabled;
+  try {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem('daily-circuit:sound-enabled', String(enabled));
+    }
+  } catch (error) {
+    console.error('Unable to save sound setting:', error);
+  }
+};
+
+export const playSound = (sound: Sound): void => {
+  if (!soundEnabled || typeof window === 'undefined') return;
+
+  try {
+    const AudioContextConstructor = window.AudioContext;
+    if (!AudioContextConstructor) return;
+
+    audioContext ??= new AudioContextConstructor();
+    const context = audioContext;
+    if (context.state === 'suspended') {
+      void context.resume().catch((error: unknown) => {
+        console.error('Unable to start puzzle audio:', error);
+      });
+    }
+
+    const now = context.currentTime;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const soundSettings: Record<Sound, { frequency: number; duration: number; type: OscillatorType }> = {
+      place: { frequency: 420, duration: 0.07, type: 'sine' },
+      rotate: { frequency: 620, duration: 0.09, type: 'triangle' },
+      receiver: { frequency: 880, duration: 0.13, type: 'sine' },
+      hazard: { frequency: 145, duration: 0.22, type: 'sawtooth' },
+      hint: { frequency: 720, duration: 0.1, type: 'triangle' },
+      win: { frequency: 523.25, duration: 0.48, type: 'triangle' },
+      laser: { frequency: 880, duration: 0.16, type: 'sine' },
+    };
+    const settings = soundSettings[sound];
+
+    oscillator.type = settings.type;
+    oscillator.frequency.setValueAtTime(settings.frequency, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + settings.duration);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    if (sound === 'win') {
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      oscillator.frequency.setValueAtTime(notes[0] ?? 523.25, now);
+      for (let index = 1; index < notes.length; index += 1) {
+        const note = notes[index];
+        if (note !== undefined) {
+          oscillator.frequency.setValueAtTime(note, now + index * 0.11);
+        }
+      }
+      oscillator.start(now);
+      oscillator.stop(now + settings.duration);
+    } else {
+      if (sound === 'receiver') {
+        oscillator.frequency.exponentialRampToValueAtTime(
+          settings.frequency * 1.25,
+          now + settings.duration
+        );
+      }
+      oscillator.start(now);
+      oscillator.stop(now + settings.duration + 0.02);
+    }
+  } catch (error) {
+    console.error('Unable to play puzzle sound:', error);
+  }
+};
+
+export const playPlace = (): void => playSound('place');
+export const playRotate = (): void => playSound('rotate');
+export const playReceiverMet = (): void => playSound('receiver');
+export const playHazard = (): void => playSound('hazard');
+export const playHint = (): void => playSound('hint');
+export const playWin = (): void => playSound('win');
+
+
+=== FILE: src\client\board.tsx ===
+
+import type { Placement, PuzzleEvaluation } from './rules';
+import type { DailyLevel } from './puzzles';
+import { Part, Device } from './parts';
+import { names } from './rules';
+export function Board({
+  level,
+  grid,
+  result,
+  onCell,
+}: {
+  level: DailyLevel;
+  grid: Placement[];
+  result: PuzzleEvaluation;
+  onCell: (i: number) => void;
+}) {
+  return (
+    <div className="chassis">
+      <div className="machine-label">
+        <i /> DCâ€“06 <span>POWER ROUTING UNIT</span>
+        <i />
+      </div>
+      <div
+        className="sockets"
+        style={{
+          gridTemplateColumns: `repeat(${level.size},minmax(0,1fr))`,
+          gridTemplateRows: `repeat(${level.size},minmax(0,1fr))`,
+        }}
+      >
+        {grid.map((p, i) => {
+          const live = (result.voltages.get(i) ?? 0) > 0;
+          const receiver = level.targets.find((r) => r.index === i);
+          return (
+            <button
+              key={i}
+              onClick={() => onCell(i)}
+              className={`socket ${p.fixed} ${p.type && p.fixed === 'none' ? 'fitted' : ''} ${live ? 'energized' : ''}`}
+              aria-label={`${String.fromCharCode(65 + Math.floor(i / level.size))}${1 + (i % level.size)}: ${p.fixed === 'none' ? (p.type ? names[p.type] : 'empty socket') : p.fixed}${receiver ? ` needs ${receiver.voltage} volts` : ''}`}
+            >
+              {p.fixed === 'none' ? (
+                p.type ? (
+                  <Part
+                    type={p.type}
+                    rotation={
+                      p.rotation + (p.type === 1 ? 1 : p.type === 3 ? 1 : 0)
+                    }
+                    live={live}
+                  />
+                ) : (
+                  <span className="pins" />
+                )
+              ) : p.fixed === 'wall' ? (
+                <span className="vent" />
+              ) : (
+                <span className="module">
+                  <Device kind={p.fixed} />
+                  <small>
+                    {p.fixed === 'source'
+                      ? '5V'
+                      : p.fixed === 'target'
+                        ? `${receiver?.voltage}V`
+                        : p.fixed === 'booster'
+                          ? '+5V'
+                          : '!'}
+                  </small>
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className="machine-bottom">
+        <i />
+        <span className="slots" />
+        <span className="serial">DC / LAB SERIES</span>
+        <i />
+      </div>
+    </div>
+  );
+}
+
+
+=== FILE: src\client\campaignProgress.ts ===
+
+export type CampaignGrade = 'S' | 'A' | 'B' | 'C';
+
+export type CampaignProgressData = {
+  unlockedThrough: number;
+  bestGrades: Record<number, CampaignGrade>;
+};
+
+export type CampaignProgressSnapshot =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'ready'; data: CampaignProgressData };
+
+const loadingSnapshot: CampaignProgressSnapshot = { status: 'loading' };
+let snapshot: CampaignProgressSnapshot = loadingSnapshot;
+const listeners = new Set<() => void>();
+
+const STORAGE_KEY = 'daily-circuit:campaign-progress';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isGrade = (value: unknown): value is CampaignGrade =>
+  value === 'S' || value === 'A' || value === 'B' || value === 'C';
+
+const GRADE_ORDER: CampaignGrade[] = ['S', 'A', 'B', 'C'];
+
+const notifyListeners = (): void => {
+  listeners.forEach((listener) => listener());
+};
+
+const loadLocalProgress = (): CampaignProgressData => {
+  try {
+    if (typeof window === 'undefined') return { unlockedThrough: 0, bestGrades: {} };
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { unlockedThrough: 0, bestGrades: {} };
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return { unlockedThrough: 0, bestGrades: {} };
+
+    const bestGrades: Record<number, CampaignGrade> = {};
+    if (isRecord(parsed.bestGrades)) {
+      for (const [key, value] of Object.entries(parsed.bestGrades)) {
+        const id = Number(key);
+        if (Number.isSafeInteger(id) && id >= 1 && id <= 30 && isGrade(value)) {
+          bestGrades[id] = value;
+        }
+      }
+    }
+
+    let unlockedThrough = 0;
+    const storedUnlocked = parsed.unlockedThrough;
+    if (typeof storedUnlocked === 'number' && Number.isSafeInteger(storedUnlocked)) {
+      unlockedThrough = Math.max(0, Math.min(30, storedUnlocked));
+    } else {
+      for (let id = 1; id <= 30; id += 1) {
+        if (bestGrades[id] === undefined) break;
+        unlockedThrough = id;
+      }
+    }
+
+    return { unlockedThrough, bestGrades };
+  } catch {
+    return { unlockedThrough: 0, bestGrades: {} };
+  }
+};
+
+const saveLocalProgress = (data: CampaignProgressData): void => {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+export const subscribeCampaignProgress = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
+export const getCampaignProgress = (): CampaignProgressSnapshot => snapshot;
+
+export const refreshCampaignProgress = async (): Promise<void> => {
+  snapshot = loadingSnapshot;
+  notifyListeners();
+
+  try {
+    if (import.meta.env.DEV || !navigator.onLine) throw new Error('Local session');
+    const response = await fetch('/api/campaign-progress', {signal:AbortSignal.timeout(4000)});
+    if (!response.ok) {
+      throw new Error(`Campaign progress request failed (${response.status})`);
+    }
+
+    const payload: unknown = await response.json();
+    if (
+      !isRecord(payload) ||
+      payload.success !== true ||
+      typeof payload.unlockedThrough !== 'number' ||
+      !Number.isSafeInteger(payload.unlockedThrough) ||
+      payload.unlockedThrough < 0 ||
+      payload.unlockedThrough > 30 ||
+      !isRecord(payload.bestGrades)
+    ) {
+      throw new Error('Campaign progress response was invalid');
+    }
+
+    const bestGrades: Record<number, CampaignGrade> = {};
+    for (const [levelKey, grade] of Object.entries(payload.bestGrades)) {
+      const levelId = Number(levelKey);
+      if (
+        !Number.isSafeInteger(levelId) ||
+        levelId < 1 ||
+        levelId > 30 ||
+        !isGrade(grade)
+      ) {
+        throw new Error('Campaign progress contained an invalid best grade');
+      }
+      bestGrades[levelId] = grade;
+    }
+
+    const data = {
+      unlockedThrough: payload.unlockedThrough,
+      bestGrades,
+    };
+    saveLocalProgress(data);
+    snapshot = { status: 'ready', data };
+  } catch {
+    const local = loadLocalProgress();
+    snapshot = { status: 'ready', data: local };
+  }
+
+  notifyListeners();
+};
+
+export const recordCampaignCompletion = async (
+  levelId: number,
+  grade: CampaignGrade
+): Promise<void> => {
+  try {
+    if (import.meta.env.DEV || !navigator.onLine) throw new Error('Local session');
+    const response = await fetch('/api/campaign-progress', {
+      signal:AbortSignal.timeout(4000),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ levelId, grade }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Campaign completion could not be saved (${response.status})`);
+    }
+
+    const payload: unknown = await response.json();
+    if (!isRecord(payload) || payload.success !== true) {
+      throw new Error('Campaign completion was not accepted');
+    }
+
+    await refreshCampaignProgress();
+    if (snapshot.status !== 'ready') {
+      throw new Error('Campaign completion saved, but progress could not be refreshed');
+    }
+  } catch {
+    const local = loadLocalProgress();
+    const previousBest = local.bestGrades[levelId];
+    const previousRank = previousBest ? GRADE_ORDER.indexOf(previousBest) : -1;
+    const nextRank = GRADE_ORDER.indexOf(grade);
+    if (previousRank < 0 || nextRank < previousRank) {
+      local.bestGrades[levelId] = grade;
+    }
+    if (levelId > local.unlockedThrough) {
+      local.unlockedThrough = levelId;
+    }
+    saveLocalProgress(local);
+    snapshot = { status: 'ready', data: local };
+    notifyListeners();
+  }
+};
+
+
+=== FILE: src\client\dailyState.ts ===
+
+export type GradeDistribution = {
+  sPlus: number;
+  a: number;
+  b: number;
+  c: number;
+};
+
+export type PlayerStats = {
+  streak: number;
+  totalPuzzles: number;
+  averageCost: number | null;
+  personalBest: number | null;
+  personalBests: { levelId: number; cost: number | null }[];
+  bestTimeSeconds: number | null;
+  efficiencyRating: string;
+};
+
+export type DailyStateData = {
+  totalCompletions: number;
+  globalAverageCost: number | null;
+  gradeDistribution: GradeDistribution;
+  playerCompletions: number;
+  playerStats: PlayerStats;
+};
+
+export type CommunityDistribution = {
+  total: number;
+  gradeDistribution: GradeDistribution;
+  playerGrade: 'S' | 'A' | 'B' | 'C' | null;
+};
+
+export type DailyStateSnapshot =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'ready'; data: DailyStateData; preview: boolean };
+
+export type ScoreResult = {
+  streak: number;
+  integrationWarnings: string[];
+};
+
+export type ShareResult = {
+  alreadyShared: boolean;
+};
+
+const loadingSnapshot: DailyStateSnapshot = { status: 'loading' };
+const snapshots = new Map<number, DailyStateSnapshot>();
+const listeners = new Set<() => void>();
+
+const STORAGE_KEY = 'daily-circuit:local-stats';
+const PREVIEW_FLAG_KEY = 'daily-circuit:preview-mode';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+export const isPreviewMode = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false;
+    return import.meta.env.DEV || !navigator.onLine || window.sessionStorage.getItem(PREVIEW_FLAG_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const setPreviewMode = (): void => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(PREVIEW_FLAG_KEY, 'true');
+    }
+  } catch {
+    // ignore storage errors
+  }
+};
+
+type LocalStats = {
+  lastDay?: number;
+  streak: number;
+  totalPuzzles: number;
+  totalCost: number;
+  bestCost: number | null;
+  bestTime: number | null;
+  gradeCounts: GradeDistribution;
+  completions: number;
+};
+
+const emptyLocalStats: LocalStats = {
+  streak: 0,
+  totalPuzzles: 0,
+  totalCost: 0,
+  bestCost: null,
+  bestTime: null,
+  gradeCounts: { sPlus: 0, a: 0, b: 0, c: 0 },
+  completions: 0,
+};
+
+const loadLocalStats = (): LocalStats => {
+  try {
+    if (typeof window === 'undefined') return { ...emptyLocalStats };
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...emptyLocalStats };
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return { ...emptyLocalStats };
+    return {
+      ...(isFiniteNumber(parsed.lastDay) ? {lastDay:parsed.lastDay} : {}),
+      streak: isFiniteNumber(parsed.streak) ? parsed.streak : 0,
+      totalPuzzles: isFiniteNumber(parsed.totalPuzzles) ? parsed.totalPuzzles : 0,
+      totalCost: isFiniteNumber(parsed.totalCost) ? parsed.totalCost : 0,
+      bestCost: parsed.bestCost === null || isFiniteNumber(parsed.bestCost) ? parsed.bestCost : null,
+      bestTime: parsed.bestTime === null || isFiniteNumber(parsed.bestTime) ? parsed.bestTime : null,
+      gradeCounts: isRecord(parsed.gradeCounts)
+        ? {
+            sPlus: isFiniteNumber(parsed.gradeCounts.sPlus) ? parsed.gradeCounts.sPlus : 0,
+            a: isFiniteNumber(parsed.gradeCounts.a) ? parsed.gradeCounts.a : 0,
+            b: isFiniteNumber(parsed.gradeCounts.b) ? parsed.gradeCounts.b : 0,
+            c: isFiniteNumber(parsed.gradeCounts.c) ? parsed.gradeCounts.c : 0,
+          }
+        : { sPlus: 0, a: 0, b: 0, c: 0 },
+      completions: isFiniteNumber(parsed.completions) ? parsed.completions : 0,
+    };
+  } catch {
+    return { ...emptyLocalStats };
+  }
+};
+
+const saveLocalStats = (stats: LocalStats): void => {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const gradeForCost = (cost: number, targetCost: number): 'S' | 'A' | 'B' | 'C' => {
+  if (cost <= targetCost) return 'S';
+  if (cost <= targetCost * 1.15) return 'A';
+  if (cost <= targetCost * 1.3) return 'B';
+  return 'C';
+};
+
+const fieldForGrade = (grade: 'S' | 'A' | 'B' | 'C'): keyof GradeDistribution => {
+  if (grade === 'S') return 'sPlus';
+  if (grade === 'A') return 'a';
+  if (grade === 'B') return 'b';
+  return 'c';
+};
+
+const seedMockDistribution = (): GradeDistribution => {
+  const seed = Math.floor(Date.now() / 86_400_000) * 7919;
+  return {
+    sPlus: 128 + (seed % 73),
+    a: 214 + (seed % 51),
+    b: 89 + (seed % 37),
+    c: 34 + (seed % 19),
+  };
+};
+
+const buildLocalState = (stats: LocalStats): DailyStateData => {
+  const mockDist = seedMockDistribution();
+  const gradeDist: GradeDistribution = {
+    sPlus: mockDist.sPlus + stats.gradeCounts.sPlus,
+    a: mockDist.a + stats.gradeCounts.a,
+    b: mockDist.b + stats.gradeCounts.b,
+    c: mockDist.c + stats.gradeCounts.c,
+  };
+  const grades: { grade: 'S' | 'A' | 'B' | 'C'; count: number }[] = [
+    { grade: 'S', count: stats.gradeCounts.sPlus },
+    { grade: 'A', count: stats.gradeCounts.a },
+    { grade: 'B', count: stats.gradeCounts.b },
+    { grade: 'C', count: stats.gradeCounts.c },
+  ];
+  grades.sort((l, r) => r.count - l.count);
+  const top = grades[0];
+  return {
+    totalCompletions: stats.completions + mockDist.sPlus + mockDist.a + mockDist.b + mockDist.c,
+    globalAverageCost: stats.totalPuzzles > 0 ? stats.totalCost / stats.totalPuzzles : null,
+    gradeDistribution: gradeDist,
+    playerCompletions: stats.completions,
+    playerStats: {
+      streak: stats.streak,
+      totalPuzzles: stats.totalPuzzles,
+      averageCost: stats.totalPuzzles > 0 ? stats.totalCost / stats.totalPuzzles : null,
+      personalBest: stats.bestCost,
+      personalBests: [
+        { levelId: 1, cost: stats.bestCost },
+        { levelId: 2, cost: null },
+        { levelId: 3, cost: null },
+      ],
+      bestTimeSeconds: stats.bestTime,
+      efficiencyRating: top && top.count > 0 ? top.grade : 'â€”',
+    },
+  };
+};
+
+const parseDailyState = (value: unknown): DailyStateData | undefined => {
+  if (!isRecord(value) || !isRecord(value.gradeDistribution) || !isRecord(value.playerStats)) {
+    return undefined;
+  }
+
+  const { gradeDistribution, playerStats } = value;
+  const globalAverageCost = value.globalAverageCost;
+  const averageCost = playerStats.averageCost;
+  const personalBest = playerStats.personalBest;
+  const personalBests = playerStats.personalBests;
+  const bestTimeSeconds = playerStats.bestTimeSeconds;
+
+  if (
+    !isFiniteNumber(value.totalCompletions) ||
+    !isFiniteNumber(value.playerCompletions) ||
+    (globalAverageCost !== null && !isFiniteNumber(globalAverageCost)) ||
+    !isFiniteNumber(gradeDistribution.sPlus) ||
+    !isFiniteNumber(gradeDistribution.a) ||
+    !isFiniteNumber(gradeDistribution.b) ||
+    !isFiniteNumber(gradeDistribution.c) ||
+    !isFiniteNumber(playerStats.streak) ||
+    !isFiniteNumber(playerStats.totalPuzzles) ||
+    (averageCost !== null && !isFiniteNumber(averageCost)) ||
+    (personalBest !== null && !isFiniteNumber(personalBest)) ||
+    !Array.isArray(personalBests) ||
+    personalBests.length !== 3 ||
+    (bestTimeSeconds !== null && !isFiniteNumber(bestTimeSeconds)) ||
+    typeof playerStats.efficiencyRating !== 'string'
+  ) {
+    return undefined;
+  }
+
+  const parsedPersonalBests: { levelId: number; cost: number | null }[] = [];
+  for (const best of personalBests) {
+    if (
+      !isRecord(best) ||
+      !isFiniteNumber(best.levelId) ||
+      (best.cost !== null && !isFiniteNumber(best.cost))
+    ) {
+      return undefined;
+    }
+    parsedPersonalBests.push({ levelId: best.levelId, cost: best.cost });
+  }
+
+  return {
+    totalCompletions: value.totalCompletions,
+    globalAverageCost,
+    gradeDistribution: {
+      sPlus: gradeDistribution.sPlus,
+      a: gradeDistribution.a,
+      b: gradeDistribution.b,
+      c: gradeDistribution.c,
+    },
+    playerCompletions: value.playerCompletions,
+    playerStats: {
+      streak: playerStats.streak,
+      totalPuzzles: playerStats.totalPuzzles,
+      averageCost,
+      personalBest,
+      personalBests: parsedPersonalBests,
+      bestTimeSeconds,
+      efficiencyRating: playerStats.efficiencyRating,
+    },
+  };
+};
+
+export const subscribeDailyState = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
+export const getDailyState = (levelId: number): DailyStateSnapshot =>
+  snapshots.get(levelId) ?? loadingSnapshot;
+
+const notifyListeners = (): void => {
+  listeners.forEach((listener) => listener());
+};
+
+export const refreshDailyState = async (levelId: number): Promise<void> => {
+  snapshots.set(levelId, loadingSnapshot);
+  notifyListeners();
+
+  try {
+    if (isPreviewMode()) throw new Error('Local session');
+    const response = await fetch(`/api/daily-state?levelId=${levelId}`, { signal: AbortSignal.timeout(4000) });
+    if (!response.ok) {
+      throw new Error(`Daily telemetry request failed (${response.status})`);
+    }
+
+    const payload: unknown = await response.json();
+    const data = parseDailyState(payload);
+    if (!data) {
+      throw new Error('Daily telemetry response was invalid');
+    }
+    snapshots.set(levelId, { status: 'ready', data, preview: false });
+  } catch {
+    setPreviewMode();
+    const local = loadLocalStats();
+    snapshots.set(levelId, { status: 'ready', data: buildLocalState(local), preview: true });
+  }
+
+  notifyListeners();
+};
+
+export const submitScore = async (
+  score: {
+    levelId: number;
+    cost: number;
+    targetCost?: number;
+    parts: number;
+    hintsUsed: number;
+    durationSeconds: number;
+  }
+): Promise<ScoreResult> => {
+  try {
+    if (isPreviewMode()) throw new Error('Local session');
+    const response = await fetch('/api/submit-score', {
+      signal: AbortSignal.timeout(4000),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(score),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Score submission failed (${response.status})`);
+    }
+
+    const payload: unknown = await response.json();
+    if (!isRecord(payload) || payload.success !== true || !isFiniteNumber(payload.streak)) {
+      throw new Error('Score submission was not accepted');
+    }
+
+    const integrationWarnings = Array.isArray(payload.integrationWarnings)
+      ? payload.integrationWarnings.filter(
+          (warning): warning is string => typeof warning === 'string'
+        )
+      : [];
+
+    return { streak: payload.streak, integrationWarnings };
+  } catch {
+    setPreviewMode();
+    const stats = loadLocalStats();
+    const targetCost = score.targetCost ?? 100;
+    const grade = gradeForCost(score.cost, targetCost);
+    stats.completions += 1;
+    stats.totalPuzzles += 1;
+    stats.totalCost += score.cost;
+    stats.gradeCounts[fieldForGrade(grade)] += 1;
+    if (stats.bestCost === null || score.cost < stats.bestCost) {
+      stats.bestCost = score.cost;
+    }
+    if (stats.bestTime === null || score.durationSeconds < stats.bestTime) {
+      stats.bestTime = score.durationSeconds;
+    }
+    const day = Math.floor(Date.now() / 86400000);
+    if (stats.lastDay !== day) stats.streak = stats.lastDay === day - 1 ? stats.streak + 1 : 1;
+    stats.lastDay = day;
+    saveLocalStats(stats);
+    void refreshDailyState(score.levelId);
+    return { streak: stats.streak, integrationWarnings: [] };
+  }
+};
+
+export const getCommunityDistribution = async (
+  levelId: number
+): Promise<CommunityDistribution> => {
+  try {
+    const response = await fetch(
+      `/api/community-distribution?levelId=${levelId}`
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Community distribution request failed (${response.status})`
+      );
+    }
+
+    const payload: unknown = await response.json();
+    if (
+      !isRecord(payload) ||
+      payload.success !== true ||
+      !isFiniteNumber(payload.total) ||
+      !isRecord(payload.gradeDistribution) ||
+      !isFiniteNumber(payload.gradeDistribution.sPlus) ||
+      !isFiniteNumber(payload.gradeDistribution.a) ||
+      !isFiniteNumber(payload.gradeDistribution.b) ||
+      !isFiniteNumber(payload.gradeDistribution.c) ||
+      (payload.playerGrade !== null &&
+        payload.playerGrade !== 'S' &&
+        payload.playerGrade !== 'A' &&
+        payload.playerGrade !== 'B' &&
+        payload.playerGrade !== 'C')
+    ) {
+      throw new Error('Community distribution response was invalid');
+    }
+
+    return {
+      total: payload.total,
+      gradeDistribution: {
+        sPlus: payload.gradeDistribution.sPlus,
+        a: payload.gradeDistribution.a,
+        b: payload.gradeDistribution.b,
+        c: payload.gradeDistribution.c,
+      },
+      playerGrade: payload.playerGrade,
+    };
+  } catch (error) {
+    console.error('Unable to load community distribution, using mock:', error);
+    setPreviewMode();
+    const stats = loadLocalStats();
+    const mockDist = seedMockDistribution();
+    return {
+      total: mockDist.sPlus + mockDist.a + mockDist.b + mockDist.c + stats.completions,
+      gradeDistribution: {
+        sPlus: mockDist.sPlus + stats.gradeCounts.sPlus,
+        a: mockDist.a + stats.gradeCounts.a,
+        b: mockDist.b + stats.gradeCounts.b,
+        c: mockDist.c + stats.gradeCounts.c,
+      },
+      playerGrade: null,
+    };
+  }
+};
+
+export const shareDailyResult = async (
+  levelDate?: string,
+  grade?: string,
+  cost?: number,
+  targetCost?: number,
+  hintsUsed?: number
+): Promise<ShareResult> => {
+  try {
+    const response = await fetch('/api/share-result', { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(`Sharing the daily result failed (${response.status})`);
+    }
+
+    const payload: unknown = await response.json();
+    if (
+      !isRecord(payload) ||
+      payload.success !== true ||
+      typeof payload.alreadyShared !== 'boolean'
+    ) {
+      throw new Error('Daily result share was not accepted');
+    }
+
+    return { alreadyShared: payload.alreadyShared };
+  } catch (error) {
+    console.error('Unable to share via Devvit, copying to clipboard:', error);
+    const date = levelDate ?? new Date().toISOString().slice(0, 10);
+    const rank = grade ?? 'â€”';
+    const spent = cost ?? 0;
+    const target = targetCost ?? 0;
+    const hints = hintsUsed ?? 0;
+    const summary = `âš¡ Daily Circuit #${date} â€” Grade ${rank} | ${spent} / ${target} | ${hints} Hints`;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(summary);
+      }
+    } catch {
+      // clipboard may be unavailable; still return success since we tried
+    }
+
+    return { alreadyShared: false };
+  }
+};
+
+void refreshDailyState(1);
+
+
+=== FILE: src\client\game.html ===
+
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <meta name="theme-color" content="#ffda57" />
+    <title>Daily Circuit â€” Puzzle Workbench</title>
+  </head>
+  <body class="h-full">
+    <div id="root" class="h-full"></div>
+    <script type="module" src="game.tsx"></script>
+  </body>
+</html>
+
+
+=== FILE: src\client\game.tsx ===
+
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  Zap,
+  Volume2,
+  VolumeX,
+  BookOpen,
+  CalendarDays,
+  Layers,
+  Undo2,
+  RotateCcw,
+  Lightbulb,
+  SlidersHorizontal,
+  ClipboardList,
+  CircleHelp,
+  Radio,
+  Target,
+  Coins,
+  X,
+  LockKeyhole,
+  Check,
+  MousePointer2,
+  ChevronRight,
+} from 'lucide-react';
+import {
+  getDailyLevel,
+  getCampaignLevels,
+  dailyLayout,
+  type DailyLevel,
+} from './puzzles';
+import { evaluate, type Placement } from './rules';
+import { solve } from './solver';
+import { Board } from './board';
+import { Part, Device } from './parts';
+import { names } from './rules';
+import { playSound, getSoundEnabled, setSoundEnabled } from './audio';
+import { submitScore, isPreviewMode } from './dailyState';
+import {
+  refreshCampaignProgress,
+  recordCampaignCompletion,
+  getCampaignProgress,
+  subscribeCampaignProgress,
+} from './campaignProgress';
+import '@fontsource/barlow-condensed/800.css';
+import '@fontsource/space-grotesk/500.css';
+import '@fontsource/space-grotesk/700.css';
+import './index.css';
+const pad = (v: number) => String(v).padStart(2, '0');
+const prices = [0, 10, 15, 25];
+function initial(level: DailyLevel): Placement[] {
+  const grid = Array.from({ length: level.size ** 2 }, (_, i): Placement => ({
+    fixed:
+      i === level.source
+        ? 'source'
+        : level.targets.some((t) => t.index === i)
+          ? 'target'
+          : level.hazards.includes(i)
+            ? 'hazard'
+            : level.walls.includes(i)
+              ? 'wall'
+              : level.boosters.includes(i)
+                ? 'booster'
+                : 'none',
+    type: 0,
+    rotation: 0,
+  }));
+  if (level.mode === 'daily') {
+    const parts = [...dailyLayout(new Date(level.date)).solution];
+    for (const n of [0, 3]) {
+      const pair = parts[n];
+      if (pair) grid[pair[0]] = { ...pair[1], fixed: 'none' };
+    }
+  }
+  return grid;
+}
+function load(level: DailyLevel, key: string) {
+  const base = initial(level);
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    if (
+      saved &&
+      Number.isSafeInteger(saved.hints) &&
+      saved.hints >= 0 &&
+      Array.isArray(saved.grid) &&
+      saved.grid.length === base.length &&
+      base.every((p, i) => {
+        const s = saved.grid[i];
+        return (
+          s &&
+          p.fixed === s.fixed &&
+          [0, 1, 2, 3].includes(s.type) &&
+          [0, 1, 2, 3].includes(s.rotation)
+        );
+      })
+    )
+      return {
+        grid: saved.grid as Placement[],
+        hints: Number(saved.hints),
+        finished: saved.finished === true,
+      };
+  } catch {
+    /* Optional device storage. */
+  }
+  return { grid: base, hints: 0, finished: false };
+}
+function Modal({
+  title,
+  children,
+  close,
+}: {
+  title: string;
+  children: ReactNode;
+  close: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    d?.showModal();
+    return () => d?.close();
+  }, []);
+  return (
+    <dialog ref={ref} onCancel={close}>
+      <div className="dialog-head">
+        <span className="micro">DAILY CIRCUIT / FIELD MANUAL</span>
+        <button className="mini" onClick={close} aria-label="Close">
+          <X />
+        </button>
+      </div>
+      <h2>{title}</h2>
+      {children}
+    </dialog>
+  );
+}
+function Workbench({
+  level,
+  change,
+}: {
+  level: DailyLevel;
+  change: (l: DailyLevel) => void;
+}) {
+  const daily = level.mode === 'daily',
+    key = `dc:bench:3:${level.date}`;
+  const [saved] = useState(() => load(level, key));
+  const [grid, setGrid] = useState(saved.grid),
+    [hints, setHints] = useState(saved.hints),
+    [finished, setFinished] = useState(saved.finished);
+  const [tool, setTool] = useState(1),
+    [history, setHistory] = useState<Placement[][]>([]),
+    [modal, setModal] = useState(''),
+    [sound, setSound] = useState(getSoundEnabled),
+    [notice, setNotice] = useState(''),
+    [shareText, setShareText] = useState('');
+  const [openedAt] = useState(() => Date.now());
+  const started = useRef(openedAt);
+  const result = useMemo(
+    () => evaluate(level, grid, hints * 5),
+    [level, grid, hints]
+  );
+  const met = result.receivers.filter((r) => r.met).length;
+  const grade =
+    result.totalCost <= level.targetCost
+      ? 'S'
+      : result.totalCost <= level.targetCost * 1.15
+        ? 'A'
+        : result.totalCost <= level.targetCost * 1.3
+          ? 'B'
+          : 'C';
+  const progress = useSyncExternalStore(
+    subscribeCampaignProgress,
+    getCampaignProgress
+  );
+  const unlocked =
+    progress.status === 'ready' ? progress.data.unlockedThrough + 1 : 1;
+  const isWin = met === level.targets.length && !result.hazardPowered;
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify({ grid, hints, finished }));
+    } catch {
+      /* Private browsing. */
+    }
+  }, [key, grid, hints, finished]);
+  function apply(next: Placement[], charged = hints) {
+    setHistory((h) => [...h.slice(-79), grid]);
+    setGrid(next);
+    setHints(charged);
+    const r = evaluate(level, next, charged * 5);
+    const count = r.receivers.filter((v) => v.met).length;
+    if (!r.hazardPowered && count === level.targets.length) {
+      setFinished(true);
+      setModal('win');
+      playSound('win');
+      if (daily) {
+        void submitScore({
+          levelId: 31,
+          cost: r.totalCost,
+          targetCost: level.targetCost,
+          parts: next.filter((p) => p.fixed === 'none' && p.type > 0).length,
+          hintsUsed: charged,
+          durationSeconds: Math.floor((Date.now() - started.current) / 1000),
+        });
+      } else
+        void recordCampaignCompletion(
+          level.id,
+          r.totalCost <= level.targetCost
+            ? 'S'
+            : r.totalCost <= level.targetCost * 1.15
+              ? 'A'
+              : r.totalCost <= level.targetCost * 1.3
+                ? 'B'
+                : 'C'
+        );
+    } else if (r.hazardPowered) {
+      playSound('hazard');
+      setNotice('Overload! Disconnect the hazard.');
+    } else if (count > met) {
+      playSound('receiver');
+      setNotice('Receiver online!');
+    }
+  }
+  function tap(i: number) {
+    const p = grid[i];
+    if (!p) return;
+    if (isWin) {
+      setModal('win');
+      return;
+    }
+    if (p.fixed !== 'none') {
+      setNotice(
+        {
+          wall: 'Blocked socket â€” route around it.',
+          source: 'Core online. Sends 5V in every direction.',
+          booster: 'Booster restores power to 5V.',
+          hazard: 'Hazard! Keep power away.',
+          target: `Receiver needs ${level.targets.find((t) => t.index === i)?.voltage}V.`,
+        }[p.fixed]
+      );
+      return;
+    }
+    if (!tool && !p.type) return;
+    const rotate = tool !== 0 && p.type === tool;
+    playSound(rotate ? 'rotate' : 'place');
+    setNotice('');
+    apply(
+      grid.map((c, j) =>
+        j === i
+          ? {
+              ...c,
+              type: tool,
+              rotation: rotate ? (p.rotation + 1) % 4 : tool === 1 ? 1 : 0,
+            }
+          : c
+      )
+    );
+  }
+  function reset() {
+    setGrid(initial(level));
+    setHints(0);
+    setHistory([]);
+    setFinished(false);
+    setNotice('Fresh board. Ready to route.');
+    setModal('');
+    started.current = Date.now();
+  }
+  function hint() {
+    if (isWin) return;
+    const route = daily
+      ? dailyLayout(new Date(level.date)).solution
+      : new Map(solve(level)?.map((p, i) => [i, p]));
+    const idx = grid.findIndex((p, i) => {
+      const s = route.get(i);
+      return (
+        p.fixed === 'none' &&
+        s &&
+        s.type > 0 &&
+        (s.type !== p.type ||
+          (s.type === 1
+            ? s.rotation % 2 !== p.rotation % 2
+            : s.rotation !== p.rotation))
+      );
+    });
+    if (idx < 0) {
+      setNotice('Check for an extra connection to a hazard.');
+      return;
+    }
+    const s = route.get(idx)!;
+    playSound('hint');
+    setNotice(
+      `Hint fitted at ${String.fromCharCode(65 + Math.floor(idx / level.size))}${(idx % level.size) + 1}. +5 cost.`
+    );
+    apply(
+      grid.map((p, i) =>
+        i === idx ? { ...p, type: s.type, rotation: s.rotation } : p
+      ),
+      hints + 1
+    );
+  }
+  async function share() {
+    const rows = Array.from({ length: level.size }, (_, y) =>
+      grid
+        .slice(y * level.size, (y + 1) * level.size)
+        .map((p, x) =>
+          p.fixed === 'source'
+            ? 'ÏŸ'
+            : p.fixed === 'target'
+              ? 'â—†'
+              : result.voltages.has(y * level.size + x)
+                ? 'â– '
+                : 'Â·'
+        )
+        .join(' ')
+    );
+    const text = `Daily Circuit Â· ${level.date}\nRank ${grade} | ${result.totalCost}/${level.targetCost} cost | ${hints} hints\n${rows.join('\n')}`;
+    setShareText(text);
+    setNotice('Your shareable circuit is ready.');
+    if (daily && !isPreviewMode()) {
+      try {
+        const r = await fetch('/api/share-result', { method: 'POST' });
+        if (r.ok && (await r.json()).success) {
+          setNotice('Result shared to Reddit.');
+          return;
+        }
+      } catch {
+        /* Use device sharing outside Reddit. */
+      }
+    }
+    try {
+      if (navigator.share && !isPreviewMode() && navigator.onLine) {
+        await navigator.share({ text });
+        setNotice('Result shared.');
+        return;
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice('Circuit copied â€” paste it anywhere!');
+    } catch {
+      setShareText(text);
+      setNotice('Select and copy your circuit below.');
+    }
+  }
+  const openSectors = () => {
+    void refreshCampaignProgress();
+    setModal('sectors');
+  };
+  const jump = (l: DailyLevel) => {
+    setModal('');
+    change(l);
+  };
+  const date = new Date(daily ? level.date : openedAt);
+  const id = daily
+    ? String(Math.floor(date.getTime() / 86400000) % 1000).padStart(3, '0')
+    : pad(level.id);
+  return (
+    <div className="app">
+      <header>
+        <div className="head-inner">
+          <div className="brand">
+            <span className="brand-mark">
+              <Zap fill="currentColor" />
+            </span>
+            DAILY CIRCUIT
+          </div>
+          <nav>
+            <button
+              className={daily ? 'active' : ''}
+              onClick={() => jump(getDailyLevel())}
+            >
+              <CalendarDays />
+              Daily
+            </button>
+            <button className={!daily ? 'active' : ''} onClick={openSectors}>
+              <Layers />
+              Campaign
+            </button>
+          </nav>
+          <div className="header-tools">
+            <button
+              className="mini"
+              aria-label={sound ? 'Mute sound' : 'Enable sound'}
+              onClick={() => {
+                setSoundEnabled(!sound);
+                setSound(!sound);
+                if (!sound) playSound('place');
+              }}
+            >
+              {sound ? <Volume2 /> : <VolumeX />}
+            </button>
+            <button className="help" onClick={() => setModal('help')}>
+              <CircleHelp />
+              <span>How to play</span>
+            </button>
+          </div>
+        </div>
+      </header>
+      <main>
+        <div className="intro">
+          <div>
+            <div className="eyebrow">
+              <span className="led" /> WORKBENCH ONLINE
+            </div>
+            <h1>
+              {daily ? 'Daily Challenge' : 'Campaign Sector'} <b>#{id}</b>
+            </h1>
+          </div>
+          <div className="date-stamp">
+            <CalendarDays />
+            {date
+              .toLocaleDateString('en-US', {
+                month: 'short',
+                day: '2-digit',
+                year: 'numeric',
+                timeZone: 'UTC',
+              })
+              .toUpperCase()}
+          </div>
+        </div>
+        <div className="desk">
+          <aside className="left">
+            <section className="card mission">
+              <h2>
+                <ClipboardList /> Mission brief
+              </h2>
+              <p>
+                Route power from the <strong>Core</strong> to every{' '}
+                <strong>Receiver.</strong> Keep your cost low for an S rank.
+              </p>
+              <div className="bot-art">
+                <img
+                  src="/bench-bot.png"
+                  alt="A yellow robot soldering at the workbench"
+                />
+                <span>FIG. 01 / SPARK</span>
+              </div>
+            </section>
+            <section className="card key">
+              <h2>
+                <BookOpen /> Board key
+              </h2>
+              <div>
+                {[
+                  ['source', 'Core'],
+                  ['target', 'Receiver'],
+                  ['booster', 'Booster'],
+                  ['hazard', 'Hazard'],
+                ].map(([k, label]) => (
+                  <span key={k}>
+                    <b className={'key-icon ' + k}>
+                      <Device kind={k!} />
+                    </b>
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </section>
+          </aside>
+          <section className="center" aria-label="Circuit board">
+            <div className="hud">
+              {[
+                [Coins, 'Cost', result.totalCost],
+                [Target, 'Target', level.targetCost],
+                [Radio, 'Receivers', `${met}/${level.targets.length}`],
+              ].map((_, i) => {
+                const Icon = [Coins, Target, Radio][i]!;
+                return (
+                  <div key={i}>
+                    <label>
+                      <Icon />
+                      {String(_[1])}
+                    </label>
+                    <strong>{String(_[2])}</strong>
+                  </div>
+                );
+              })}
+            </div>
+            <Board level={level} grid={grid} result={result} onCell={tap} />
+            <div className="board-foot">
+              <span className="led" />
+              {result.hazardPowered
+                ? 'OVERLOAD'
+                : isWin
+                  ? 'CIRCUIT COMPLETE'
+                  : 'SYSTEM READY'}
+              <span>
+                {level.size} Ã— {level.size} GRID
+              </span>
+            </div>
+          </section>
+          <aside className="right">
+            <section className="card tray">
+              <h2>
+                <SlidersHorizontal /> Parts tray
+              </h2>
+              <div className="parts">
+                {[1, 2, 3, 0].map((t) => (
+                  <button
+                    className={tool === t ? 'selected' : ''}
+                    key={t}
+                    aria-pressed={tool === t}
+                    onClick={() => {
+                      setTool(t);
+                      setNotice('');
+                      playSound('rotate');
+                    }}
+                  >
+                    <span className={'part-swatch swatch-' + t}>
+                      <Part type={t} />
+                    </span>
+                    <span>
+                      <strong>{names[t]}</strong>
+                      <small>{t ? `${prices[t]} cost` : 'Remove tile'}</small>
+                    </span>
+                    {tool === t && <i />}
+                  </button>
+                ))}
+              </div>
+            </section>
+            <div className="actions">
+              <button
+                disabled={!history.length || isWin}
+                onClick={() => {
+                  setGrid(history[history.length - 1]!);
+                  setHistory(history.slice(0, -1));
+                  setNotice('Last move undone.');
+                }}
+              >
+                <Undo2 /> Undo
+              </button>
+              <button onClick={() => setModal('reset')}>
+                <RotateCcw /> Reset
+              </button>
+              <button className="hint" disabled={isWin} onClick={hint}>
+                <Lightbulb /> Hint <b>+5</b>
+              </button>
+            </div>
+          </aside>
+        </div>
+        <footer aria-live="polite">
+          <MousePointer2 />
+          {notice || 'Pick a part, tap to place. Tap again to rotate.'}
+        </footer>
+      </main>
+      {modal && (
+        <Modal
+          title={
+            modal === 'help'
+              ? 'How to play'
+              : modal === 'sectors'
+                ? 'Campaign sectors'
+                : modal === 'reset'
+                  ? 'Reset this circuit?'
+                  : 'Circuit complete!'
+          }
+          close={() => setModal('')}
+        >
+          {modal === 'help' ? (
+            <>
+              <p>
+                Connect the yellow 5V Core to every green Receiver. The number
+                on each Receiver is the minimum voltage it needs.
+              </p>
+              <ol>
+                <li>
+                  Choose a part and tap an empty socket. Tap the same part again
+                  to rotate it.
+                </li>
+                <li>
+                  Power drops 1V each step. Boosters recharge it to 5V; touching
+                  a hazard overloads the board.
+                </li>
+                <li>
+                  Match or beat the target for S rank. Within 15% earns A,
+                  within 30% earns B, otherwise C. Each hint adds 5 cost.
+                </li>
+              </ol>
+              <button className="primary" onClick={() => setModal('')}>
+                Back to the bench <ChevronRight />
+              </button>
+            </>
+          ) : modal === 'sectors' ? (
+            <>
+              <p>Clear a sector to unlock the next workbench.</p>
+              <div className="sector-grid">
+                {getCampaignLevels().map((l) => (
+                  <button
+                    key={l.id}
+                    disabled={l.id > unlocked}
+                    onClick={() => jump(l)}
+                  >
+                    {l.id > unlocked ? <LockKeyhole /> : <Zap />}
+                    {pad(l.id)}{' '}
+                    {progress.status === 'ready' &&
+                      progress.data.bestGrades[l.id]}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : modal === 'reset' ? (
+            <>
+              <p>
+                This clears your placements and hint costs, not your completed
+                sectors.
+              </p>
+              <button className="primary" onClick={reset}>
+                Reset board
+              </button>
+              <button className="secondary" onClick={() => setModal('')}>
+                Keep playing
+              </button>
+            </>
+          ) : (
+            <>
+              <div aria-hidden="true" className="spark-shower">
+                {Array.from({ length: 26 }, (_, i) => (
+                  <i
+                    key={i}
+                    style={{
+                      left: `${(i * 37) % 100}%`,
+                      background: ['#ffda57', '#94d1ae', '#b19bd7'][i % 3],
+                      animationDelay: `${(i % 8) * 0.06}s`,
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="win-badge">{grade}</div>
+              <p>
+                All {met} receivers online. Final cost <b>{result.totalCost}</b>{' '}
+                / {level.targetCost}.
+              </p>
+              <button className="primary" onClick={() => void share()}>
+                <Check /> Share result
+              </button>
+              <button
+                className="secondary"
+                onClick={() =>
+                  daily || level.id === 30
+                    ? openSectors()
+                    : jump(getCampaignLevels()[level.id]!)
+                }
+              >
+                {daily || level.id === 30 ? 'Explore campaign' : 'Next level'}{' '}
+                <ChevronRight />
+              </button>
+              <p aria-live="polite">{notice}</p>
+              {shareText && (
+                <textarea
+                  readOnly
+                  aria-label="Shareable circuit"
+                  value={shareText}
+                  onFocus={(e) => e.target.select()}
+                />
+              )}
+            </>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+export function App() {
+  const [level, change] = useState(getDailyLevel);
+  return <Workbench key={level.date} level={level} change={change} />;
+}
+createRoot(document.getElementById('root')!).render(<App />);
+
+
+=== FILE: src\client\generator.ts ===
+
+import { evaluate, type Placement, type Puzzle } from './rules.ts';
+import { solve } from './solver.ts';
+
+export type GeneratedLevel = Puzzle & {
+  seed: number;
+  difficulty: number;
+  lesson: 'voltage-decay' | 'booster' | 'splitter' | 'hazard' | 'budget' | 'advanced';
+  placements: Placement[];
+  targetCost: number;
+};
+
+type Random = () => number;
+
+const MAX_ATTEMPTS = 8;
+const MIN_SIZE = 3;
+const MAX_SIZE = 12;
+
+const seededRandom = (seed: number): Random => {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const shuffled = <T,>(values: readonly T[], random: Random): T[] => {
+  const result = [...values];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    const current = result[index];
+    const swap = result[swapIndex];
+    if (current === undefined || swap === undefined) continue;
+    result[index] = swap;
+    result[swapIndex] = current;
+  }
+  return result;
+};
+
+const position = (size: number, row: number, column: number): number =>
+  row * size + column;
+
+const coordinate = (
+  size: number,
+  index: number
+): { row: number; column: number } => ({
+  row: Math.floor(index / size),
+  column: index % size,
+});
+
+const adjacent = (size: number, index: number): number[] => {
+  const { row, column } = coordinate(size, index);
+  return [
+    row > 0 ? position(size, row - 1, column) : -1,
+    column + 1 < size ? position(size, row, column + 1) : -1,
+    row + 1 < size ? position(size, row + 1, column) : -1,
+    column > 0 ? position(size, row, column - 1) : -1,
+  ].filter((nextIndex) => nextIndex >= 0);
+};
+
+const buildRoute = (
+  size: number,
+  source: number,
+  target: number,
+  blocked: ReadonlySet<number>,
+  random: Random
+): number[] | null => {
+  const previous = new Map<number, number>();
+  const visited = new Set<number>([source]);
+  const queue = [source];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === undefined) break;
+    if (current === target) break;
+
+    for (const next of shuffled(adjacent(size, current), random)) {
+      if (visited.has(next) || blocked.has(next)) continue;
+      visited.add(next);
+      previous.set(next, current);
+      queue.push(next);
+    }
+  }
+
+  if (!visited.has(target)) return null;
+
+  const route = [target];
+  let current = target;
+  while (current !== source) {
+    const parent = previous.get(current);
+    if (parent === undefined) return null;
+    route.push(parent);
+    current = parent;
+  }
+  route.reverse();
+  return route;
+};
+
+const createLessonLayout = (
+  seed: number,
+  size: number,
+  difficulty: number,
+  random: Random
+): GeneratedLevel | null => {
+  const center = Math.floor(size / 2);
+  const source = position(size, center, center);
+  const lesson =
+    difficulty === 1 ? 'voltage-decay'
+      : difficulty === 2 ? 'booster'
+        : difficulty === 3 ? 'splitter'
+          : difficulty === 4 ? 'hazard'
+            : difficulty === 5 ? 'budget'
+              : 'advanced';
+  const needsSplitter = lesson === 'splitter' || lesson === 'budget';
+
+  if (needsSplitter) {
+    const split = position(size, center - 1, center);
+    const branchLength = Math.min(center, size - 1 - center);
+    const leftTarget = position(size, center - 1, center - branchLength);
+    const rightTarget = position(size, center - 1, center + branchLength);
+    const leftBranch = branchLength > 1
+      ? [position(size, center - 1, center - 1), leftTarget]
+      : [leftTarget];
+    const rightBranch = branchLength > 1
+      ? [position(size, center - 1, center + 1), rightTarget]
+      : [rightTarget];
+    const routes = [[source, split, ...leftBranch], [split, ...rightBranch]];
+    const targets = [leftTarget, rightTarget];
+    return createSplitLesson(
+      seed,
+      size,
+      difficulty,
+      lesson,
+      routes,
+      targets,
+      source,
+      split,
+      random
+    );
+  }
+
+  const target = lesson === 'booster'
+    ? position(
+      size,
+      random() >= 0.5 ? size - 1 : 0,
+      random() >= 0.5 ? size - 1 : 0
+    )
+    : random() >= 0.5
+      ? position(size, center, random() >= 0.5 ? size - 1 : 0)
+      : position(size, random() >= 0.5 ? size - 1 : 0, center);
+  const idealRoute = buildRoute(size, source, target, new Set(), random);
+  if (!idealRoute || idealRoute.length < 2) return null;
+
+  const reserved = new Set(idealRoute);
+  const blocked = new Set<number>();
+  const hazards = new Set<number>();
+  const obstacleCandidates = shuffled(
+    Array.from({ length: size * size }, (_, index) => index)
+      .filter((index) =>
+        !reserved.has(index) &&
+        adjacent(size, index).every((neighbor) => !reserved.has(neighbor))
+      ),
+    random
+  );
+  const wallCount = difficulty < 6 ? Math.min(1, Math.floor(size / 6)) :
+    Math.min(2 + Math.floor((difficulty - 6) / 8), Math.floor(size));
+  const hazardCount = lesson === 'hazard' ? 1 :
+    difficulty >= 6 ? Math.min(1 + Math.floor((difficulty - 6) / 12), 3) : 0;
+  let obstacleIndex = 0;
+
+  for (let count = 0; count < wallCount; count += 1) {
+    const cell = obstacleCandidates[obstacleIndex];
+    if (cell === undefined) break;
+    obstacleIndex += 1;
+    blocked.add(cell);
+  }
+  for (let count = 0; count < hazardCount; count += 1) {
+    const cell = obstacleCandidates[obstacleIndex];
+    if (cell === undefined) break;
+    obstacleIndex += 1;
+    hazards.add(cell);
+  }
+
+  const blockedCells = new Set([...blocked, ...hazards]);
+  const route = buildRoute(size, source, target, blockedCells, random);
+  if (!route) return null;
+
+  const puzzle: Puzzle = {
+    size,
+    source,
+    targets: [],
+    boosters: [],
+    walls: [...blocked],
+    hazards: [...hazards],
+  };
+  const placements = createPlacements(puzzle);
+  const routeInteriors = route.slice(1, -1);
+  if (lesson === 'booster' && routeInteriors.length > 0) {
+    const boosterOffset = Math.min(routeInteriors.length - 1, Math.floor(routeInteriors.length / 2));
+    const booster = routeInteriors[boosterOffset];
+    if (booster !== undefined) puzzle.boosters = [booster];
+  } else if (difficulty >= 6) {
+    puzzle.boosters = routeInteriors.filter((_, offset) => offset % 4 === 3);
+  }
+
+  const reservedByCircuit = new Set<number>(route);
+  if ([...hazards].some((hazard) =>
+    adjacent(size, hazard).some((neighbor) => reservedByCircuit.has(neighbor))
+  )) {
+    return null;
+  }
+
+  for (const index of puzzle.walls) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'wall' };
+  }
+  for (const index of puzzle.hazards) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'hazard' };
+  }
+  for (const index of puzzle.boosters) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'booster', type: 4 };
+  }
+
+  for (let pathIndex = 1; pathIndex < route.length - 1; pathIndex += 1) {
+    const index = route[pathIndex];
+    const previous = route[pathIndex - 1];
+    const next = route[pathIndex + 1];
+    if (index === undefined || previous === undefined || next === undefined) return null;
+    if (puzzle.boosters.includes(index)) continue;
+
+    const requiredDirections = [
+      directionBetween(size, index, previous),
+      directionBetween(size, index, next),
+    ];
+    const options = shuffled(
+      componentOptions(puzzle, placements, index)
+        .filter((option) => requiredDirections.every((direction) => option.connections.includes(direction))),
+      random
+    );
+    const option = options[0];
+    if (!option) return null;
+    placements[index] = option.placement;
+  }
+
+  puzzle.targets = [{ index: target, voltage: 1 }];
+  const targetPlacement = placements[target];
+  if (targetPlacement) placements[target] = { ...targetPlacement, fixed: 'target', type: 4 };
+  const initialEvaluation = evaluate(puzzle, placements);
+  if (initialEvaluation.hazardPowered) return null;
+  const targetVoltage = initialEvaluation.voltages.get(target) ?? 0;
+  if (targetVoltage < 1) return null;
+  puzzle.targets = [{ index: target, voltage: targetVoltage }];
+
+  const solution = solve(puzzle);
+  if (!solution) return null;
+  const solvedEvaluation = evaluate(puzzle, solution);
+  if (
+    solvedEvaluation.hazardPowered ||
+    solvedEvaluation.receivers.some((receiver) => !receiver.met)
+  ) {
+    return null;
+  }
+
+  return {
+    ...puzzle,
+    seed,
+    difficulty,
+    lesson,
+    placements: solution,
+    targetCost: solvedEvaluation.hardwareCost,
+  };
+};
+
+const createPlacements = (puzzle: Puzzle): Placement[] =>
+  Array.from({ length: puzzle.size * puzzle.size }, (_, index) => {
+    if (index === puzzle.source) return { type: 4, rotation: 0, fixed: 'source' };
+    if (puzzle.targets.some((target) => target.index === index)) {
+      return { type: 4, rotation: 0, fixed: 'target' };
+    }
+    if (puzzle.boosters.includes(index)) {
+      return { type: 4, rotation: 0, fixed: 'booster' };
+    }
+    if (puzzle.walls.includes(index)) return { type: 0, rotation: 0, fixed: 'wall' };
+    if (puzzle.hazards.includes(index)) return { type: 4, rotation: 0, fixed: 'hazard' };
+    return { type: 0, rotation: 0, fixed: 'none' };
+  });
+
+type ComponentOption = {
+  placement: Placement;
+  connections: readonly number[];
+};
+
+const componentOptions = (
+  puzzle: Puzzle,
+  placements: Placement[],
+  index: number
+): ComponentOption[] =>
+  [1, 2, 3].flatMap((type) =>
+    Array.from({ length: 4 }, (_, rotation) => {
+      const candidate = placements.slice();
+      candidate[index] = { type, rotation, fixed: 'none' };
+      return {
+        placement: candidate[index] ?? { type, rotation, fixed: 'none' },
+        connections: evaluate(puzzle, candidate).connections.get(index) ?? [],
+      };
+    })
+  );
+
+const directionBetween = (size: number, from: number, to: number): number => {
+  const fromCoordinate = coordinate(size, from);
+  const toCoordinate = coordinate(size, to);
+  if (toCoordinate.row < fromCoordinate.row) return 0;
+  if (toCoordinate.column > fromCoordinate.column) return 1;
+  if (toCoordinate.row > fromCoordinate.row) return 2;
+  return 3;
+};
+
+const createSplitLesson = (
+  seed: number,
+  size: number,
+  difficulty: number,
+  lesson: GeneratedLevel['lesson'],
+  routes: number[][],
+  targets: number[],
+  source: number,
+  forcedSplitter: number | null,
+  random: Random
+): GeneratedLevel | null => {
+  const occupied = new Set(routes.flat());
+  const wallCandidates = shuffled(
+    Array.from({ length: size * size }, (_, index) => index)
+      .filter((index) =>
+        !occupied.has(index) &&
+        adjacent(size, index).every((neighbor) => !occupied.has(neighbor))
+      ),
+    random
+  );
+  const wallCount = difficulty >= 5 ? Math.min(2, Math.floor(size / 3)) : 0;
+  const walls = wallCandidates.slice(0, wallCount);
+  const puzzle: Puzzle = {
+    size,
+    source,
+    targets: [],
+    boosters: [],
+    walls,
+    hazards: [],
+  };
+  const placements = createPlacements(puzzle);
+
+  const neighbors = new Map<number, Set<number>>();
+  for (const route of routes) {
+    for (let offset = 1; offset < route.length; offset += 1) {
+      const current = route[offset];
+      const previous = route[offset - 1];
+      if (current === undefined || previous === undefined) return null;
+      const currentNeighbors = neighbors.get(current) ?? new Set<number>();
+      const previousNeighbors = neighbors.get(previous) ?? new Set<number>();
+      currentNeighbors.add(previous);
+      previousNeighbors.add(current);
+      neighbors.set(current, currentNeighbors);
+      neighbors.set(previous, previousNeighbors);
+    }
+  }
+
+  const targetSet = new Set(targets);
+  for (const [index, adjacentCells] of neighbors) {
+    if (index === source || targetSet.has(index)) continue;
+    const requiredDirections = [...adjacentCells].map((neighbor) =>
+      directionBetween(size, index, neighbor)
+    );
+    const options = shuffled(
+      componentOptions(puzzle, placements, index)
+        .filter((option) =>
+          requiredDirections.every((direction) => option.connections.includes(direction))
+        ),
+      random
+    );
+    const selectedOption = index === forcedSplitter
+      ? options.find((option) => option.placement.type === 3)
+      : options[0];
+    if (!selectedOption) return null;
+    placements[index] = selectedOption.placement;
+  }
+
+  for (const wall of walls) {
+    const placement = placements[wall];
+    if (placement) placements[wall] = { ...placement, fixed: 'wall' };
+  }
+  puzzle.targets = targets.map((index) => ({ index, voltage: 1 }));
+  for (const target of targets) {
+    const placement = placements[target];
+    if (placement) placements[target] = { ...placement, fixed: 'target', type: 4 };
+  }
+
+  const initialEvaluation = evaluate(puzzle, placements);
+  if (initialEvaluation.hazardPowered) return null;
+  const evaluatedTargets = targets.map((index) => ({
+    index,
+    voltage: initialEvaluation.voltages.get(index) ?? 0,
+  }));
+  if (evaluatedTargets.some((target) => target.voltage < 1)) return null;
+  puzzle.targets = evaluatedTargets;
+
+  const solution = solve(puzzle);
+  if (!solution) return null;
+  const solvedEvaluation = evaluate(puzzle, solution);
+  if (
+    solvedEvaluation.hazardPowered ||
+    solvedEvaluation.receivers.some((receiver) => !receiver.met)
+  ) {
+    return null;
+  }
+
+  return {
+    ...puzzle,
+    seed,
+    difficulty,
+    lesson,
+    placements: solution,
+    targetCost: solvedEvaluation.hardwareCost,
+  };
+};
+
+const createDailyLayout = (
+  seed: number,
+  size: number,
+  difficulty: number,
+  random: Random
+): GeneratedLevel | null => {
+  const center = Math.floor(size / 2);
+  const source = position(size, center, center);
+
+  const targetCount = 2 + Math.floor(random() * 2);
+  const targets: number[] = [];
+  const targetPositions = new Set<number>([source]);
+  let attempts = 0;
+  while (targets.length < targetCount && attempts < 60) {
+    attempts += 1;
+    const row = Math.floor(random() * size);
+    const col = Math.floor(random() * size);
+    const idx = position(size, row, col);
+    const minDist = Math.abs(row - center) + Math.abs(col - center);
+    if (minDist >= 3 && !targetPositions.has(idx)) {
+      targetPositions.add(idx);
+      targets.push(idx);
+    }
+  }
+  if (targets.length < 2) return null;
+
+  const blocked = new Set<number>();
+  const hazards = new Set<number>();
+  const allReserved = new Set<number>([source, ...targets]);
+
+  const obstacleCandidates = shuffled(
+    Array.from({ length: size * size }, (_, index) => index)
+      .filter((index) =>
+        !allReserved.has(index) &&
+        adjacent(size, index).every((neighbor) => !allReserved.has(neighbor))
+      ),
+    random
+  );
+  const wallCount = Math.min(2 + Math.floor(difficulty / 8), Math.floor(size / 2));
+  const hazardCount = Math.min(1 + Math.floor(difficulty / 10), 3);
+  let obstacleIndex = 0;
+  for (let count = 0; count < wallCount; count += 1) {
+    const cell = obstacleCandidates[obstacleIndex];
+    if (cell === undefined) break;
+    obstacleIndex += 1;
+    blocked.add(cell);
+    allReserved.add(cell);
+  }
+  for (let count = 0; count < hazardCount; count += 1) {
+    const cell = obstacleCandidates[obstacleIndex];
+    if (cell === undefined) break;
+    obstacleIndex += 1;
+    hazards.add(cell);
+    allReserved.add(cell);
+  }
+
+  const routes: number[][] = [];
+  const allRouteCells = new Set<number>([source]);
+  for (const target of targets) {
+    const route = buildRoute(size, source, target, new Set([...blocked, ...hazards, ...allRouteCells]), random);
+    if (!route || route.length < 4) return null;
+    for (const cell of route) allRouteCells.add(cell);
+    routes.push(route);
+  }
+
+  if ([...hazards].some((hazard) =>
+    adjacent(size, hazard).some((neighbor) => allRouteCells.has(neighbor))
+  )) {
+    return null;
+  }
+
+  const puzzle: Puzzle = {
+    size,
+    source,
+    targets: [],
+    boosters: [],
+    walls: [...blocked],
+    hazards: [...hazards],
+  };
+  const placements = createPlacements(puzzle);
+
+  const allRouteInteriors = new Set<number>();
+  for (const route of routes) {
+    for (const cell of route.slice(1, -1)) allRouteInteriors.add(cell);
+  }
+  const boosterCount = Math.min(1 + Math.floor(difficulty / 12), 3);
+  const interiorArray = shuffled([...allRouteInteriors], random);
+  const boosters: number[] = [];
+  for (let count = 0; count < Math.min(boosterCount, interiorArray.length); count += 1) {
+    const cell = interiorArray[count];
+    if (cell === undefined) break;
+    boosters.push(cell);
+  }
+  puzzle.boosters = boosters;
+
+  for (const index of puzzle.walls) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'wall' };
+  }
+  for (const index of puzzle.hazards) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'hazard' };
+  }
+  for (const index of puzzle.boosters) {
+    const placement = placements[index];
+    if (placement) placements[index] = { ...placement, fixed: 'booster', type: 4 };
+  }
+
+  const neighbors = new Map<number, Set<number>>();
+  for (const route of routes) {
+    for (let offset = 1; offset < route.length; offset += 1) {
+      const current = route[offset];
+      const previous = route[offset - 1];
+      if (current === undefined || previous === undefined) return null;
+      const currentNeighbors = neighbors.get(current) ?? new Set<number>();
+      const previousNeighbors = neighbors.get(previous) ?? new Set<number>();
+      currentNeighbors.add(previous);
+      previousNeighbors.add(current);
+      neighbors.set(current, currentNeighbors);
+      neighbors.set(previous, previousNeighbors);
+    }
+  }
+
+  const targetSet = new Set(targets);
+  for (const [index, adjacentCells] of neighbors) {
+    if (index === source || targetSet.has(index)) continue;
+    if (puzzle.boosters.includes(index)) continue;
+
+    const requiredDirections = [...adjacentCells].map((neighbor) =>
+      directionBetween(size, index, neighbor)
+    );
+    const options = shuffled(
+      componentOptions(puzzle, placements, index)
+        .filter((option) =>
+          requiredDirections.every((direction) => option.connections.includes(direction))
+        ),
+      random
+    );
+    const option = options[0];
+    if (!option) return null;
+    placements[index] = option.placement;
+  }
+
+  puzzle.targets = targets.map((index) => ({ index, voltage: 1 }));
+  for (const target of targets) {
+    const placement = placements[target];
+    if (placement) placements[target] = { ...placement, fixed: 'target', type: 4 };
+  }
+
+  const initialEvaluation = evaluate(puzzle, placements);
+  if (initialEvaluation.hazardPowered) return null;
+  const evaluatedTargets = targets.map((index) => ({
+    index,
+    voltage: initialEvaluation.voltages.get(index) ?? 0,
+  }));
+  if (evaluatedTargets.some((target) => target.voltage < 1)) return null;
+  puzzle.targets = evaluatedTargets;
+
+  const solution = solve(puzzle);
+  if (!solution) return null;
+  const solvedEvaluation = evaluate(puzzle, solution);
+  if (
+    solvedEvaluation.hazardPowered ||
+    solvedEvaluation.receivers.some((receiver) => !receiver.met)
+  ) {
+    return null;
+  }
+
+  const solutionParts = solution.filter(
+    (placement) => placement.fixed === 'none' && placement.type > 0
+  ).length;
+  if (solutionParts < 7 || solvedEvaluation.hardwareCost < 85) return null;
+
+  return {
+    ...puzzle,
+    seed,
+    difficulty,
+    lesson: 'advanced',
+    placements: solution,
+    targetCost: solvedEvaluation.hardwareCost,
+  };
+};
+
+export const generate = (
+  seed: number,
+  size: number,
+  difficulty: number
+): GeneratedLevel | null => {
+  if (!Number.isInteger(seed)) throw new Error('Seed must be an integer.');
+  if (!Number.isInteger(size) || size < MIN_SIZE || size > MAX_SIZE) {
+    throw new Error(`Size must be an integer from ${MIN_SIZE} to ${MAX_SIZE}.`);
+  }
+  if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 30) {
+    throw new Error('Difficulty must be an integer from 1 to 30.');
+  }
+
+  const dailyAttempts = MAX_ATTEMPTS * 3;
+  const maxAttempts = difficulty >= 6 ? dailyAttempts : MAX_ATTEMPTS;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const random = seededRandom(seed + attempt * 0x9e3779b9);
+    const level = difficulty >= 6
+      ? createDailyLayout(seed, size, difficulty, random)
+      : createLessonLayout(seed, size, difficulty, random);
+    if (level) return level;
+  }
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const random = seededRandom(seed + attempt * 0x9e3779b9 + 0x12345);
+    const level = createLessonLayout(seed, size, difficulty, random);
+    if (level) return level;
+  }
+  return null;
+};
+
+
+=== FILE: src\client\global.ts ===
+
+declare module '*.css';
+
+
+=== FILE: src\client\index.css ===
+
+* {
+  box-sizing: border-box;
+}
+:root {
+  --ink: #302839;
+  --cream: #fff9e9;
+  --lilac: #d9c8ef;
+  --yellow: #ffda57;
+  --border: 2px solid var(--ink);
+  --shadow: 3px 4px 0 var(--ink);
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--ink);
+  font-weight: 500;
+  color-scheme: light;
+}
+body {
+  margin: 0;
+  background-color: #e4d9f2;
+  background-image: radial-gradient(#b7a9c9 0.85px, transparent 1px);
+  background-size: 9px 9px;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+button:focus-visible {
+  outline: 3px solid #4a67da;
+  outline-offset: 2px;
+}
+button:disabled {
+  cursor: default;
+}
+svg {
+  width: 1.15em;
+  height: 1.15em;
+  stroke-width: 2.3;
+  flex: none;
+}
+header {
+  height: 70px;
+  background: var(--yellow);
+  border-bottom: 3px solid var(--ink);
+}
+.head-inner,
+main {
+  width: min(1110px, 93%);
+  margin: auto;
+}
+.head-inner {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 38px;
+}
+.brand,
+h1,
+h2,
+.hud strong,
+.parts strong,
+.win-badge {
+  font-family: 'Barlow Condensed', Impact, sans-serif;
+  font-weight: 800;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(24px, 2.9vw, 38px);
+  letter-spacing: -0.6px;
+  white-space: nowrap;
+}
+.brand-mark,
+.mini,
+.help,
+.date-stamp,
+.card,
+.chassis,
+.hud,
+.actions button,
+.primary,
+.secondary,
+dialog,
+.sector-grid button {
+  border: var(--border);
+  border-radius: 7px;
+  box-shadow: var(--shadow);
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  background: #b49adc;
+  width: 38px;
+  height: 39px;
+  transform: rotate(-6deg);
+  box-shadow: 2px 2px var(--ink);
+}
+nav,
+.header-tools,
+.help,
+.mini,
+.date-stamp,
+.eyebrow,
+.card h2,
+.actions button,
+footer,
+.primary,
+.secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+nav {
+  gap: 7px;
+}
+nav button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 7px 12px;
+}
+nav button.active {
+  background: var(--cream);
+  border-color: var(--ink);
+  box-shadow: 2px 2px var(--ink);
+}
+.header-tools {
+  margin-left: auto;
+  gap: 9px;
+}
+.mini,
+.help {
+  height: 34px;
+  background: var(--cream);
+  box-shadow: 2px 2px var(--ink);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 0 10px;
+}
+.mini {
+  width: 35px;
+  padding: 0;
+}
+.intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: clamp(12px, 3vh, 30px) 0 clamp(12px, 2.4vh, 24px);
+}
+.eyebrow,
+.micro,
+.date-stamp,
+.machine-label,
+.machine-bottom,
+.board-foot,
+.bot-art span,
+.hud label {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.eyebrow {
+  justify-content: start;
+  font-size: 10px;
+  letter-spacing: 1.6px;
+}
+.led {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+  border: 1.5px solid var(--ink);
+  background: #88d397;
+  border-radius: 100%;
+}
+h1 {
+  margin: 4px 0 0;
+  font-size: clamp(32px, 4.1vw, 58px);
+  line-height: 1;
+  letter-spacing: -1.1px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+h1 b {
+  padding: 5px 8px;
+  font:
+    700 12px ui-monospace,
+    monospace;
+  background: #c9b0e6;
+  border: var(--border);
+  border-radius: 5px;
+  letter-spacing: 0;
+  transform: rotate(-3deg);
+}
+.date-stamp {
+  background: var(--cream);
+  padding: 8px 12px;
+  box-shadow: 2px 2px var(--ink);
+  letter-spacing: 0.5px;
+}
+.desk {
+  --board: min(42vw, calc(100dvh - 275px), 440px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--board) + 40px) minmax(0, 1fr);
+  gap: clamp(16px, 2vw, 28px);
+  align-items: start;
+  max-width: 1100px;
+  margin: auto;
+}
+.left,
+.right,
+.center {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+}
+.card {
+  background: var(--cream);
+  overflow: hidden;
+}
+.card h2 {
+  justify-content: start;
+  line-height: 1;
+  margin: 0;
+  border-bottom: var(--border);
+  background: #c6afe4;
+  font-size: 24px;
+  padding: 11px 14px;
+  gap: 9px;
+}
+.card h2 svg {
+  width: 19px;
+  height: 19px;
+}
+.mission p {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 12px 15px;
+}
+.bot-art {
+  position: relative;
+  margin: 0 13px 13px;
+  border: var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  background: #ccb4e7;
+}
+.bot-art img {
+  display: block;
+  width: 100%;
+  height: clamp(93px, 20vh, 178px);
+  object-fit: cover;
+  object-position: center 48%;
+}
+.bot-art span {
+  position: absolute;
+  bottom: 5px;
+  left: 6px;
+  font-size: 8px;
+  background: var(--cream);
+  border: 1px solid;
+  padding: 2px 4px;
+}
+.key > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 11px;
+  gap: 10px 3px;
+}
+.key > div > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.key-icon {
+  display: grid;
+  place-items: center;
+  border: 1.5px solid;
+  border-radius: 4px;
+  width: 23px;
+  height: 23px;
+}
+.source {
+  --tile: #ffca44;
+}
+.target {
+  --tile: #9bd4a3;
+}
+.booster {
+  --tile: #83d6ce;
+}
+.hazard {
+  --tile: #ed929d;
+}
+.key-icon {
+  background: var(--tile);
+}
+.center {
+  gap: 10px;
+}
+.hud {
+  display: flex;
+  background: var(--cream);
+  padding: 9px 0;
+  box-shadow: 2px 3px var(--ink);
+}
+.hud > div {
+  flex: 1;
+  text-align: center;
+  border-right: 1px dashed #a99ca8;
+}
+.hud > div:last-child {
+  border: 0;
+}
+.hud label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-size: 9px;
+}
+.hud strong {
+  font-size: 27px;
+  line-height: 1.05;
+}
+.chassis {
+  background: #ac90cd;
+  padding: 0 17px;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 3px #d7c3eb,
+    inset 0 -5px #886ba5,
+    4px 5px var(--ink);
+}
+.machine-label,
+.machine-bottom,
+.board-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  font-size: 8px;
+  letter-spacing: 0.9px;
+}
+.machine-label span {
+  margin-left: auto;
+}
+.machine-label i,
+.machine-bottom i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid;
+  border-radius: 50%;
+  background: linear-gradient(
+    135deg,
+    #d8cede 42%,
+    #44374e 43% 55%,
+    #c5b5ce 56%
+  );
+}
+.sockets {
+  display: grid;
+  aspect-ratio: 1;
+  background: #60516d;
+  padding: 4px;
+  gap: 3px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  box-shadow: 0 2px #d0b9e3;
+}
+.socket {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  background: #e4daed;
+  border: 1.5px solid #403548;
+  border-radius: 4px;
+  box-shadow:
+    inset 1px 2px #fbf5ff,
+    inset -1px -3px #bbacc8;
+  padding: 0;
+}
+.socket:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+.socket:active,
+.parts button:active,
+.actions button:active {
+  transform: translateY(2px);
+}
+.pins {
+  width: 32%;
+  aspect-ratio: 1;
+  background: radial-gradient(circle, #ac9fb6 16%, transparent 20%) 0 0/50% 50%;
+}
+.socket.fitted {
+  background: #cab8df;
+}
+.component {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.socket.source,
+.socket.target,
+.socket.booster,
+.socket.hazard {
+  background: var(--tile);
+  box-shadow:
+    inset 1px 2px #ffffff7d,
+    inset -1px -4px #0002;
+}
+.module {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  width: 83%;
+  height: 82%;
+  border: 1.5px solid #352d39;
+  border-radius: 4px;
+  background: var(--tile);
+  box-shadow: 1px 2px #0003;
+  line-height: 1;
+}
+.module svg {
+  width: 48%;
+  height: 52%;
+  stroke-width: 2.7;
+}
+.module small {
+  font: 800 clamp(7px, 1.2vh, 11px) monospace;
+}
+.source .module svg {
+  fill: currentColor;
+}
+.wall {
+  background: #95899e;
+  box-shadow:
+    inset 0 2px #bcafc4,
+    inset 0 -3px #7b7082;
+}
+.vent {
+  width: 62%;
+  height: 53%;
+  border: 1.5px solid #63556c;
+  border-radius: 2px;
+  background: repeating-linear-gradient(135deg, #a79aad 0 4px, #6d6078 4px 7px);
+}
+.machine-bottom .slots {
+  width: 40px;
+  height: 6px;
+  background: repeating-linear-gradient(
+    90deg,
+    #574563 0 3px,
+    transparent 3px 6px
+  );
+}
+.serial,
+.board-foot > span:last-child {
+  margin-left: auto;
+}
+.board-foot {
+  height: 16px;
+  gap: 5px;
+  font-size: 9px;
+}
+.board-foot .led {
+  width: 7px;
+  height: 7px;
+}
+.tray h2 {
+  background: var(--yellow);
+}
+.parts {
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+.parts button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  border: 1.5px solid #695971;
+  border-radius: 6px;
+  background: #f6f0e5;
+  padding: 7px;
+  position: relative;
+}
+.parts button.selected {
+  background: #fae5a5;
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px var(--ink);
+  padding: 6.5px;
+}
+.parts button i {
+  background: var(--ink);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-left: auto;
+  margin-right: 5px;
+}
+.part-swatch {
+  width: 43px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: #cbb9de;
+  border: 1.5px solid;
+  border-radius: 5px;
+  box-shadow:
+    inset 0 2px #ffffff90,
+    inset 0 -3px #0002;
+}
+.part-swatch svg:not(.component) {
+  width: 22px;
+  height: 22px;
+}
+.swatch-0 {
+  background: #e7d6ca;
+}
+.parts strong {
+  font-size: 22px;
+  line-height: 1.05;
+}
+.parts small {
+  display: block;
+  font-size: 11px;
+}
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.actions button,
+.primary,
+.secondary {
+  box-shadow: 2px 3px var(--ink);
+  padding: 8px 5px;
+  font-weight: 700;
+  font-size: 13px;
+  background: var(--cream);
+}
+.actions button:disabled {
+  color: #726674;
+  background: #e2d7dd;
+}
+.actions .hint {
+  grid-column: span 2;
+  background: #d3c0e7;
+}
+.hint b {
+  font: 700 10px monospace;
+  border: 1px solid;
+  border-radius: 4px;
+  padding: 2px 4px;
+  background: #f0e5f8;
+}
+footer {
+  margin: clamp(12px, 2vh, 20px) auto 8px;
+  font-size: 12px;
+  color: #514359;
+}
+footer svg {
+  width: 14px;
+}
+.flow {
+  stroke-dasharray: 5 12;
+  animation: flow 0.6s linear infinite;
+}
+@keyframes flow {
+  to {
+    stroke-dashoffset: -17;
+  }
+}
+dialog {
+  color: var(--ink);
+  background: var(--cream);
+  width: min(410px, 92vw);
+  max-height: 92dvh;
+  padding: 19px;
+  overflow: auto;
+}
+dialog::backdrop {
+  background: #32243e80;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.dialog-head .mini {
+  height: 27px;
+  width: 27px;
+}
+dialog h2 {
+  font-size: 36px;
+  margin: 8px 0;
+}
+dialog p,
+dialog li {
+  font-size: 14px;
+  line-height: 1.5;
+}
+dialog ol {
+  padding-left: 22px;
+}
+dialog li {
+  margin-bottom: 8px;
+}
+.primary,
+.secondary {
+  width: 100%;
+  background: var(--yellow);
+  margin-top: 10px;
+}
+.secondary {
+  background: #d8c4e9;
+}
+.sector-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.sector-grid button {
+  padding: 7px 2px;
+  font-size: 11px;
+  background: var(--yellow);
+  box-shadow: 1px 2px var(--ink);
+}
+.sector-grid button:disabled {
+  background: #e7deea;
+  color: #776a7e;
+}
+.win-badge {
+  border: 3px solid;
+  box-shadow: 4px 4px var(--ink);
+  border-radius: 18px;
+  transform: rotate(-7deg);
+  margin: 15px auto;
+  text-align: center;
+  width: 92px;
+  font-size: 70px;
+  background: var(--yellow);
+  animation: pop 0.45s ease-out;
+}
+@keyframes pop {
+  from {
+    transform: scale(0.3) rotate(-35deg);
+  }
+  75% {
+    transform: scale(1.16) rotate(2deg);
+  }
+}
+textarea {
+  width: 100%;
+  height: 110px;
+}
+.socket.energized.fitted {
+  background: #bce2c2;
+}
+@media (min-width: 701px) and (max-height: 640px) {
+  header {
+    height: 48px;
+  }
+  .head-inner {
+    gap: 24px;
+  }
+  .brand {
+    font-size: 27px;
+  }
+  .brand-mark {
+    width: 29px;
+    height: 29px;
+  }
+  .mini,
+  .help {
+    height: 29px;
+  }
+  nav button {
+    padding: 4px 9px;
+  }
+  .intro {
+    margin: 11px 0;
+  }
+  .eyebrow {
+    font-size: 8px;
+  }
+  h1 {
+    font-size: 34px;
+  }
+  .desk {
+    --board: min(41vw, calc(100dvh - 231px));
+    max-width: 930px;
+    grid-template-columns: minmax(165px, 1fr) calc(var(--board) + 35px) minmax(
+        165px,
+        1fr
+      );
+    gap: 16px;
+  }
+  .card h2 {
+    font-size: 21px;
+    padding: 7px 11px;
+  }
+  .mission p {
+    font-size: 12px;
+    margin: 8px 11px;
+  }
+  .bot-art {
+    margin: 0 10px 9px;
+  }
+  .bot-art img {
+    height: clamp(76px, 21vh, 120px);
+    object-fit: contain;
+    background: #c9b5e5;
+  }
+  .key > div {
+    padding: 7px;
+    gap: 5px;
+  }
+  .left,
+  .right {
+    gap: 10px;
+  }
+  .parts {
+    padding: 7px;
+    gap: 5px;
+  }
+  .parts button {
+    padding: 4px 7px;
+  }
+  .parts button.selected {
+    padding: 3.5px 6.5px;
+  }
+  .part-swatch {
+    width: 35px;
+    height: 33px;
+  }
+  .parts strong {
+    font-size: 19px;
+  }
+  .hud {
+    padding: 5px 0;
+  }
+  .hud strong {
+    font-size: 22px;
+  }
+  .center {
+    gap: 7px;
+  }
+  .chassis {
+    padding: 0 14px;
+  }
+  .machine-label,
+  .machine-bottom {
+    height: 20px;
+  }
+  .actions button {
+    padding: 6px 2px;
+  }
+  .board-foot {
+    height: 10px;
+  }
+  footer {
+    margin: 9px 0;
+    font-size: 11px;
+  }
+}
+@media (max-width: 700px) {
+  header {
+    height: 47px;
+  }
+  .head-inner,
+  main {
+    width: 94%;
+  }
+  .head-inner {
+    gap: 9px;
+  }
+  .brand {
+    font-size: 22px;
+    gap: 5px;
+  }
+  .brand-mark {
+    width: 26px;
+    height: 28px;
+  }
+  .header-tools {
+    gap: 4px;
+  }
+  .help span {
+    display: none;
+  }
+  .help,
+  .mini {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+  }
+  .head-inner nav {
+    margin-left: auto;
+    gap: 0;
+  }
+  nav button {
+    padding: 5px;
+    font-size: 11px;
+    gap: 3px;
+  }
+  nav svg {
+    display: none;
+  }
+  .header-tools {
+    margin-left: 0;
+  }
+  .intro {
+    margin: 10px 0;
+  }
+  .eyebrow {
+    font-size: 8px;
+  }
+  h1 {
+    font-size: 31px;
+    gap: 6px;
+  }
+  h1 b {
+    font-size: 10px;
+    padding: 3px;
+  }
+  .date-stamp {
+    padding: 4px;
+    font-size: 8px;
+  }
+  .desk {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    align-items: center;
+  }
+  .left {
+    display: none;
+  }
+  .center,
+  .right {
+    width: min(100%, calc(100dvh - 270px), 460px);
+  }
+  .center {
+    gap: 7px;
+  }
+  .hud {
+    padding: 4px;
+  }
+  .hud > div {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .hud label {
+    font-size: 8px;
+  }
+  .hud strong {
+    font-size: 21px;
+  }
+  .chassis {
+    padding: 0 12px;
+  }
+  .machine-label,
+  .machine-bottom {
+    height: 20px;
+  }
+  .board-foot {
+    height: 11px;
+    font-size: 8px;
+  }
+  .right {
+    gap: 7px;
+    width: min(100%, 460px);
+  }
+  .tray h2 {
+    font-size: 16px;
+    padding: 3px 8px;
+  }
+  .tray h2 svg {
+    width: 13px;
+    height: 13px;
+  }
+  .parts {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5px;
+    padding: 6px;
+  }
+  .parts button,
+  .parts button.selected {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: center;
+    padding: 3px 1px;
+  }
+  .parts button i {
+    display: none;
+  }
+  .part-swatch {
+    width: 31px;
+    height: 25px;
+  }
+  .parts strong {
+    font-size: 15px;
+  }
+  .parts small {
+    font-size: 9px;
+    line-height: 1;
+  }
+  .actions {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .actions .hint {
+    grid-column: auto;
+  }
+  .actions button {
+    padding: 5px;
+    font-size: 12px;
+  }
+  footer {
+    margin: 8px auto 0;
+    font-size: 10px;
+    text-align: center;
+  }
+  .brand-mark svg {
+    width: 18px;
+  }
+  .sockets {
+    gap: 2px;
+  }
+}
+.spark-shower {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.spark-shower i {
+  position: absolute;
+  left: var(--x);
+  top: -16px;
+  width: 7px;
+  height: 12px;
+  border: 1px solid var(--ink);
+  background: var(--color);
+  animation: shower 1.7s ease-in both;
+}
+@keyframes shower {
+  from {
+    transform: translateY(-20px) rotate(0);
+  }
+  to {
+    transform: translateY(460px) rotate(260deg);
+    opacity: 0;
+  }
+}
+.energized .module {
+  box-shadow:
+    inset 0 0 0 2px #fff6,
+    0 0 6px #ffe797;
+}
+.socket.energized.fitted .component {
+  animation: surge 0.25s ease-out;
+}
+@keyframes surge {
+  40% {
+    filter: brightness(1.45);
+  }
+}
+.module svg {
+  width: 58%;
+  height: 58%;
+}
+.desk {
+  --board: min(40vw, calc(100dvh - 380px), 440px);
+}
+@media (min-width: 701px) and (max-height: 640px) {
+  .desk {
+    --board: min(40vw, calc(100dvh - 267px));
+    grid-template-columns: minmax(0, 1fr) calc(var(--board) + 36px) minmax(
+        0,
+        1fr
+      );
+    max-width: 840px;
+  }
+  .bot-art img {
+    object-fit: cover;
+    object-position: 50% 45%;
+  }
+  .intro {
+    max-width: 840px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .parts strong {
+    font-size: 21px;
+  }
+  .board-foot {
+    height: 12px;
+  }
+}
+@media (max-width: 700px) {
+  .center {
+    width: min(100%, calc(100dvh - 364px), 460px);
+  }
+  .parts button {
+    line-height: 1.08;
+  }
+  .hud strong {
+    font-size: 20px;
+  }
+}
+@media (min-width: 701px) and (max-height: 520px) {
+  .intro {
+    margin: 8px auto;
+  }
+  .desk {
+    --board: min(40vw, calc(100dvh - 253px));
+  }
+  .card h2 {
+    padding: 6px 11px;
+  }
+  .hud label {
+    font-size: 9px;
+  }
+  .parts button {
+    padding: 3px 6px;
+  }
+  .parts button.selected {
+    padding: 2.5px 5.5px;
+  }
+  .mission p {
+    line-height: 1.4;
+  }
+  .bot-art img {
+    height: 108px;
+  }
+  .right {
+    gap: 8px;
+  }
+  footer {
+    margin: 7px 0 0;
+  }
+}
+@media (min-width: 701px) and (max-height: 640px) {
+  .center .hud {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(var(--board) + 36px);
+    height: 44px;
+  }
+  .desk {
+    --board: min(42vw, calc(100dvh - 216px));
+  }
+  .bot-art img {
+    height: clamp(92px, 24vh, 135px);
+  }
+  .center .hud > div {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+  .intro h1 {
+    font-size: 32px;
+  }
+  .head-inner {
+    max-width: 840px;
+  }
+}
+@media (min-width: 701px) and (max-height: 440px) {
+  header {
+    height: 39px;
+  }
+  .intro {
+    margin: 4px auto;
+  }
+  .desk {
+    --board: calc(100dvh - 185px);
+  }
+  .center .hud {
+    top: 44px;
+    height: 39px;
+  }
+  .left .key {
+    display: none;
+  }
+  .parts {
+    grid-template-columns: 1fr 1fr;
+  }
+  .parts button,
+  .parts button.selected {
+    flex-direction: column;
+    gap: 2px;
+    text-align: center;
+    padding: 3px;
+  }
+  .parts small {
+    font-size: 9px;
+  }
+  .parts button i {
+    display: none;
+  }
+  .part-swatch {
+    width: 29px;
+    height: 25px;
+  }
+  .left .bot-art img {
+    height: 90px;
+  }
+  .card h2 {
+    font-size: 18px;
+  }
+  .desk {
+    gap: 10px;
+  }
+  .actions {
+    gap: 4px;
+  }
+  .actions button {
+    padding: 3px;
+  }
+  footer {
+    margin: 4px 0;
+  }
+  .board-foot {
+    height: 9px;
+  }
+}
+@media (max-width: 365px) {
+  .date-stamp {
+    display: none;
+  }
+  .brand {
+    font-size: 18px;
+  }
+  .head-inner {
+    gap: 5px;
+  }
+  nav button {
+    font-size: 10px;
+  }
+  .hud label svg {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+
+=== FILE: src\client\module.d.ts ===
+
+/// <reference types="vite/client" />
+
+declare module '*.png' {
+  const content: string;
+  export default content;
+}
+
+declare module '*.jpg' {
+  const content: string;
+  export default content;
+}
+
+
+=== FILE: src\client\parts.tsx ===
+
+import { Zap, Skull, ChevronsUp, Eraser, RadioReceiver } from 'lucide-react';
+export function Part({
+  type,
+  rotation = 0,
+  live = false,
+}: {
+  type: number;
+  rotation?: number;
+  live?: boolean;
+}) {
+  const path =
+    type === 1
+      ? 'M8 32H56'
+      : type === 2
+        ? 'M32 7V27Q32 32 37 32H56'
+        : 'M8 32H56M32 32V7';
+  return type === 0 ? (
+    <Eraser />
+  ) : (
+    <svg
+      className="component"
+      viewBox="0 0 64 64"
+      fill="none"
+      aria-hidden="true"
+      style={{ transform: `rotate(${rotation * 90}deg)` }}
+    >
+      <g strokeLinecap="butt" strokeLinejoin="round">
+        <path d={path} stroke="#28232f" strokeWidth="17" />
+        <path d={path} stroke={live ? '#83efbc' : '#b8a4dc'} strokeWidth="11" />
+        <path d={path} stroke={live ? '#ddffda' : '#ded2ed'} strokeWidth="3" />
+        {(type === 1
+          ? [
+              [7, 25, 9, 14],
+              [48, 25, 9, 14],
+            ]
+          : type === 2
+            ? [
+                [25, 5, 14, 9],
+                [48, 25, 9, 14],
+              ]
+            : [
+                [7, 25, 9, 14],
+                [48, 25, 9, 14],
+                [25, 5, 14, 9],
+              ]
+        ).map(([x, y, w, h], i) => (
+          <rect
+            key={i}
+            x={x}
+            y={y}
+            width={w}
+            height={h}
+            rx="1"
+            fill="#ffe081"
+            stroke="#302737"
+            strokeWidth="2.6"
+          />
+        ))}
+        {live && (
+          <path className="flow" d={path} stroke="white" strokeWidth="3" />
+        )}
+      </g>
+    </svg>
+  );
+}
+export function Device({ kind }: { kind: string }) {
+  return kind === 'source' ? (
+    <Zap fill="currentColor" />
+  ) : kind === 'booster' ? (
+    <ChevronsUp />
+  ) : kind === 'hazard' ? (
+    <Skull />
+  ) : (
+    <RadioReceiver />
+  );
+}
+
+
+=== FILE: src\client\puzzles.ts ===
+
+import catalog from './sectors.json' with { type: 'json' };
+import type { Puzzle } from './rules.ts';
+export const DAILY_LEVEL_ID = 31;
+export const CAMPAIGN_LEVEL_COUNT = 30;
+export type DailyLevel = Puzzle & {
+  id: number;
+  mode: 'daily' | 'campaign';
+  title: string;
+  date: string;
+  targetCost: number;
+  difficulty: string;
+};
+const sectors: DailyLevel[] = catalog.map((level) => ({
+  ...level,
+  mode: 'campaign',
+}));
+export const getCampaignLevels = () => sectors;
+export function dailyLayout(now = new Date()) {
+  const day = Math.floor(now.getTime() / 86400000);
+  let seed = day >>> 0;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const transform = (i: number) => {
+    let x = i % 6,
+      y = Math.floor(i / 6);
+    if (day % 8 >= 4) x = 5 - x;
+    for (let n = 0; n < day % 4; n++) {
+      [x, y] = [5 - y, x];
+    }
+    return y * 6 + x;
+  };
+  const top = day % 3 === 0 ? 4 : 5,
+    bottom = day % 5 < 2 ? 30 : 35;
+  const upper = [12, 13, 14, 15, 9, 3, 4, ...(top === 5 ? [5] : [])];
+  const lower = [
+    15,
+    21,
+    27,
+    ...(bottom === 30 ? [26, 25, 24, 30] : [28, 29, 35]),
+  ];
+  const used = new Set([...upper, ...lower]);
+  const available = Array.from({ length: 36 }, (_, i) => i).filter(
+    (i) => !used.has(i)
+  );
+  for (let i = available.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [available[i], available[j]] = [available[j]!, available[i]!];
+  }
+  const fixed = [12, 15, 27, top, bottom];
+  const hazards = available
+    .filter((i) =>
+      fixed.every(
+        (j) =>
+          Math.abs((i % 6) - (j % 6)) +
+            Math.abs(Math.floor(i / 6) - Math.floor(j / 6)) >
+          1
+      )
+    )
+    .slice(0, 2);
+  const level: DailyLevel = {
+    size: 6,
+    id: 31,
+    title: 'Daily Circuit',
+    mode: 'daily',
+    date: now.toISOString().slice(0, 10),
+    difficulty: 'STANDARD',
+    source: transform(12),
+    boosters: [15, 27].map(transform),
+    targets: [
+      { index: transform(top), voltage: top === 5 ? 1 : 2 },
+      { index: transform(bottom), voltage: bottom === 30 ? 1 : 2 },
+    ],
+    walls: available
+      .filter((i) => !hazards.includes(i))
+      .slice(0, 3)
+      .map(transform),
+    hazards: hazards.map(transform),
+    targetCost: 0,
+  };
+  const directions = (a: number, b: number) =>
+    b === a - 6 ? 0 : b === a + 1 ? 1 : b === a + 6 ? 2 : 3;
+  const solution = new Map<number, { type: number; rotation: number }>();
+  for (const path of [upper, lower])
+    for (let j = 1; j < path.length - 1; j++) {
+      const i = path[j]!;
+      if (fixed.includes(i)) continue;
+      const cell = transform(i),
+        a = directions(cell, transform(path[j - 1]!)),
+        b = directions(cell, transform(path[j + 1]!));
+      const straight = Math.abs(a - b) === 2;
+      solution.set(cell, {
+        type: straight ? 1 : 2,
+        rotation: straight ? a % 2 : (a + 1) % 4 === b ? a : b,
+      });
+      level.targetCost += straight ? 10 : 15;
+    }
+  return { level, solution };
+}
+export const getDailyLevel = (now = new Date()) => dailyLayout(now).level;
+export const getLevelById = (id: number) =>
+  id === 31 ? getDailyLevel() : sectors.find((l) => l.id === id);
+
+
+=== FILE: src\client\rules.ts ===
+
+export type FixedType = 'none' | 'source' | 'target' | 'wall' | 'booster' | 'hazard';
+
+export type Placement = {
+  type: number;
+  rotation: number;
+  fixed: FixedType;
+};
+
+export type Puzzle = {
+  size: number;
+  source: number;
+  targets: readonly { index: number; voltage: number }[];
+  boosters: readonly number[];
+  walls: readonly number[];
+  hazards: readonly number[];
+};
+
+export type ReceiverResult = {
+  index: number;
+  voltage: number;
+  requiredVoltage: number;
+  met: boolean;
+};
+
+export type PuzzleEvaluation = {
+  voltages: ReadonlyMap<number, number>;
+  receivers: ReceiverResult[];
+  hazardPowered: boolean;
+  hardwareCost: number;
+  totalCost: number;
+  connections: ReadonlyMap<number, readonly number[]>;
+};
+
+type Direction = {
+  row: number;
+  column: number;
+  direction: number;
+  opposite: number;
+};
+
+export const DIRECTIONS: readonly Direction[] = [
+  { row: -1, column: 0, direction: 0, opposite: 2 },
+  { row: 0, column: 1, direction: 1, opposite: 3 },
+  { row: 1, column: 0, direction: 2, opposite: 0 },
+  { row: 0, column: -1, direction: 3, opposite: 1 },
+];
+
+export const names = ['Eraser', 'Conduit', 'Corner', 'Splitter'];
+export const SOURCE_VOLTAGE = 5;
+export const BOOSTER_VOLTAGE = 5;
+const COMPONENT_COSTS: Record<number, number> = {
+  1: 10,
+  2: 15,
+  3: 25,
+};
+const COMPONENT_ARMS: Record<number, readonly number[]> = {
+  0: [],
+  1: [0, 2],
+  2: [0, 1],
+  3: [0, 1, 2],
+  4: [0, 1, 2, 3],
+};
+const ALL_ARMS = [0, 1, 2, 3];
+
+const armsFor = (placement: Placement | undefined): number[] => {
+  if (!placement || placement.fixed === 'wall') return [];
+  if (placement.fixed !== 'none') return ALL_ARMS;
+  const arms = COMPONENT_ARMS[placement.type] ?? [];
+  return arms.map((arm) => (arm + placement.rotation) % 4);
+};
+
+const fixedTypeAt = (puzzle: Puzzle, index: number): FixedType => {
+  if (index === puzzle.source) return 'source';
+  if (puzzle.targets.some((target) => target.index === index)) return 'target';
+  if (puzzle.boosters.includes(index)) return 'booster';
+  if (puzzle.walls.includes(index)) return 'wall';
+  if (puzzle.hazards.includes(index)) return 'hazard';
+  return 'none';
+};
+
+export const evaluate = (
+  puzzle: Puzzle,
+  placements: readonly Placement[],
+  additionalCost = 0
+): PuzzleEvaluation => {
+  const cellCount = puzzle.size * puzzle.size;
+  const connections = new Map<number, readonly number[]>();
+  const effectivePlacements: (Placement | undefined)[] = [];
+  let hardwareCost = 0;
+
+  for (let index = 0; index < cellCount; index += 1) {
+    const placement = placements[index];
+    if (!placement) {
+      effectivePlacements.push(undefined);
+      connections.set(index, []);
+      continue;
+    }
+    const effectivePlacement = { ...placement, fixed: fixedTypeAt(puzzle, index) };
+    effectivePlacements.push(effectivePlacement);
+    connections.set(index, armsFor(effectivePlacement));
+    if (effectivePlacement.fixed === 'none' && effectivePlacement.type > 0) {
+      hardwareCost += COMPONENT_COSTS[effectivePlacement.type] ?? 10;
+    }
+  }
+
+  const voltages = new Map<number, number>([[puzzle.source, SOURCE_VOLTAGE]]);
+  const queue: { index: number; voltage: number }[] = [
+    { index: puzzle.source, voltage: SOURCE_VOLTAGE },
+  ];
+  let hazardPowered = false;
+
+  while (queue.length > 0) {
+    queue.sort((left, right) => right.voltage - left.voltage);
+    const current = queue.shift();
+    if (!current || current.voltage <= 0) continue;
+
+    const row = Math.floor(current.index / puzzle.size);
+    const column = current.index % puzzle.size;
+    const currentConnections = connections.get(current.index) ?? [];
+
+    for (const direction of DIRECTIONS) {
+      if (!currentConnections.includes(direction.direction)) continue;
+      const nextRow = row + direction.row;
+      const nextColumn = column + direction.column;
+      if (
+        nextRow < 0 ||
+        nextRow >= puzzle.size ||
+        nextColumn < 0 ||
+        nextColumn >= puzzle.size
+      ) {
+        continue;
+      }
+
+      const nextIndex = nextRow * puzzle.size + nextColumn;
+      const nextPlacement = effectivePlacements[nextIndex];
+      const nextConnections = connections.get(nextIndex) ?? [];
+      if (!nextPlacement || !nextConnections.includes(direction.opposite)) continue;
+      if (nextPlacement.fixed === 'hazard') hazardPowered = true;
+
+      const nextVoltage =
+        nextPlacement.fixed === 'booster'
+          ? BOOSTER_VOLTAGE
+          : current.voltage - 1;
+      if (
+        nextVoltage > (voltages.get(nextIndex) ?? -1) &&
+        nextVoltage >= 0
+      ) {
+        voltages.set(nextIndex, nextVoltage);
+        queue.push({ index: nextIndex, voltage: nextVoltage });
+      }
+    }
+  }
+
+  const receivers = puzzle.targets.map((target) => {
+    const voltage = voltages.get(target.index) ?? 0;
+    return {
+      index: target.index,
+      voltage,
+      requiredVoltage: target.voltage,
+      met: voltage >= target.voltage,
+    };
+  });
+
+  return {
+    voltages,
+    receivers,
+    hazardPowered,
+    hardwareCost,
+    totalCost: hardwareCost + additionalCost,
+    connections,
+  };
+};
+
+
+=== FILE: src\client\sectorProgress.ts ===
+
+const SECTOR_TITLES = [
+  'VOLTAGE DECAY',
+  'SIGNAL BOOST',
+  'SPLITTER ARRAY',
+  'HAZARD ZONE',
+  'TARGET BUDGET',
+  'PHASE SHIFT',
+  'CROSSTALK',
+  'NIGHT GRID',
+  'DEEP CURRENT',
+  'GHOST SIGNAL',
+  'BLACKOUT',
+  'ZERO DAY',
+  'STATIC BLOOM',
+  'REDLINE',
+  'ION STORM',
+  'DARK MATTER',
+  'OVERDRIVE',
+  'COLD START',
+  'NEXUS',
+  'PHANTOM TRACE',
+  'AFTERGLOW',
+  'SINGULARITY',
+  'ECHO CHAMBER',
+  'VOID RUNNER',
+  'NIGHT SHIFT',
+  'QUANTUM LOOP',
+  'LAST MILE',
+  'CORE MEMORY',
+  'FINAL RELAY',
+  'CIRCUIT BREAKER',
+];
+
+export const campaignSectorTitle = (levelId: number): string => {
+  const title = SECTOR_TITLES[levelId - 1];
+  if (!title) throw new Error(`Unknown campaign sector: ${levelId}`);
+  return title;
+};
+
+
+=== FILE: src\client\solver.ts ===
+
+import {
+  DIRECTIONS,
+  evaluate,
+  BOOSTER_VOLTAGE,
+  type Placement,
+  type Puzzle,
+  type PuzzleEvaluation,
+} from './rules.ts';
+
+type SolverResult = {
+  placements: Placement[];
+  cost: number;
+};
+
+type SearchContext = {
+  deadline: number;
+  best: SolverResult | null;
+  stopped: boolean;
+};
+
+const SEARCH_TIME_LIMIT_MS = 2000;
+
+export type SolverOptions = {
+  timeLimitMs?: number;
+  lockedEmptyIndices?: readonly number[];
+};
+
+const COMPONENT_OPTIONS = [1, 2, 3]
+  .flatMap((type) =>
+    Array.from({ length: 4 }, (_, rotation) => ({ type, rotation }))
+  )
+  .map(({ type, rotation }) => {
+    const probePuzzle: Puzzle = {
+      size: 2,
+      source: 0,
+      targets: [],
+      boosters: [],
+      walls: [],
+      hazards: [],
+    };
+    const probePlacements: Placement[] = [
+      { type: 4, rotation: 0, fixed: 'source' },
+      { type, rotation, fixed: 'none' },
+      { type: 0, rotation: 0, fixed: 'none' },
+      { type: 0, rotation: 0, fixed: 'none' },
+    ];
+    const probe = evaluate(probePuzzle, probePlacements);
+    return {
+      type,
+      rotation,
+      arms: probe.connections.get(1) ?? [],
+      cost: probe.hardwareCost,
+    };
+  })
+  .sort((left, right) => left.cost - right.cost);
+
+const createInitialPlacements = (
+  puzzle: Puzzle,
+  existingPlacements?: readonly Placement[]
+): Placement[] =>
+  Array.from({ length: puzzle.size * puzzle.size }, (_, index) => {
+    const existing = existingPlacements?.[index];
+    if (existing && existing.fixed === 'none' && existing.type > 0) {
+      return { ...existing };
+    }
+    if (index === puzzle.source) return { type: 4, rotation: 0, fixed: 'source' };
+    if (puzzle.targets.some((target) => target.index === index)) {
+      return { type: 4, rotation: 0, fixed: 'target' };
+    }
+    if (puzzle.boosters.includes(index)) {
+      return { type: 4, rotation: 0, fixed: 'booster' };
+    }
+    if (puzzle.walls.includes(index)) {
+      return { type: 0, rotation: 0, fixed: 'wall' };
+    }
+    if (puzzle.hazards.includes(index)) {
+      return { type: 4, rotation: 0, fixed: 'hazard' };
+    }
+    return { type: 0, rotation: 0, fixed: 'none' };
+  });
+
+const isBlocked = (
+  puzzle: Puzzle,
+  index: number,
+  lockedEmptyIndices: ReadonlySet<number>
+): boolean =>
+  puzzle.walls.includes(index) ||
+  puzzle.hazards.includes(index) ||
+  lockedEmptyIndices.has(index);
+
+const distance = (puzzle: Puzzle, left: number, right: number): number =>
+  Math.abs(Math.floor(left / puzzle.size) - Math.floor(right / puzzle.size)) +
+  Math.abs((left % puzzle.size) - (right % puzzle.size));
+
+const canReachReceiver = (
+  puzzle: Puzzle,
+  evaluation: PuzzleEvaluation,
+  receiverIndex: number,
+  requiredVoltage: number
+): boolean => {
+  let bestRemainingVoltage = -1;
+  for (const [index, voltage] of evaluation.voltages) {
+    const optimisticVoltage = voltage - distance(puzzle, index, receiverIndex);
+    bestRemainingVoltage = Math.max(bestRemainingVoltage, optimisticVoltage);
+  }
+
+  for (const boosterIndex of puzzle.boosters) {
+    const optimisticVoltage =
+      BOOSTER_VOLTAGE - distance(puzzle, boosterIndex, receiverIndex);
+    bestRemainingVoltage = Math.max(bestRemainingVoltage, optimisticVoltage);
+  }
+
+  return bestRemainingVoltage >= requiredVoltage;
+};
+
+const canReachAllReceivers = (
+  puzzle: Puzzle,
+  evaluation: PuzzleEvaluation
+): boolean =>
+  evaluation.receivers
+    .filter((receiver) => !receiver.met)
+    .every((receiver) =>
+      canReachReceiver(
+        puzzle,
+        evaluation,
+        receiver.index,
+        receiver.requiredVoltage
+      )
+    );
+
+const isEvaluationValid = (
+  evaluation: PuzzleEvaluation,
+  protectedReceiverIndices: readonly number[]
+): boolean =>
+  !evaluation.hazardPowered &&
+  protectedReceiverIndices.every((index) =>
+    evaluation.receivers.some((receiver) => receiver.index === index && receiver.met)
+  );
+
+export const solve = (
+  puzzle: Puzzle,
+  existingPlacements?: readonly Placement[],
+  options: SolverOptions = {}
+): Placement[] | null => {
+  const timeLimitMs = options.timeLimitMs ?? SEARCH_TIME_LIMIT_MS;
+  const lockedEmptyIndices = new Set(options.lockedEmptyIndices ?? []);
+  const context: SearchContext = {
+    deadline: Date.now() + timeLimitMs,
+    best: null,
+    stopped: false,
+  };
+  const initialPlacements = createInitialPlacements(puzzle, existingPlacements);
+
+  const connectRemainingReceivers = (placements: Placement[]): void => {
+    if (context.stopped) return;
+    if (Date.now() >= context.deadline) {
+      context.stopped = true;
+      return;
+    }
+
+    const evaluation = evaluate(puzzle, placements);
+    if (evaluation.hazardPowered) return;
+    if (context.best && evaluation.hardwareCost >= context.best.cost) return;
+    if (!canReachAllReceivers(puzzle, evaluation)) return;
+
+    const remainingReceivers = evaluation.receivers
+      .filter((receiver) => !receiver.met)
+      .sort((left, right) => distance(puzzle, puzzle.source, left.index) - distance(puzzle, puzzle.source, right.index));
+
+    if (remainingReceivers.length === 0) {
+      context.best = {
+        placements: placements.map((placement) => ({ ...placement })),
+        cost: evaluation.hardwareCost,
+      };
+      return;
+    }
+
+    const target = remainingReceivers[0];
+    if (!target) return;
+    const protectedReceiverIndices = evaluation.receivers
+      .filter((receiver) => receiver.met)
+      .map((receiver) => receiver.index);
+    routeToReceiver(
+      puzzle.source,
+      null,
+      target.index,
+      target.requiredVoltage,
+      placements,
+      new Set([puzzle.source]),
+      protectedReceiverIndices
+    );
+  };
+
+  const routeToReceiver = (
+    currentIndex: number,
+    incomingArm: number | null,
+    targetIndex: number,
+    targetVoltage: number,
+    placements: Placement[],
+    path: Set<number>,
+    protectedReceiverIndices: readonly number[]
+  ): void => {
+    if (context.stopped || Date.now() >= context.deadline) {
+      context.stopped = true;
+      return;
+    }
+    if (context.best && evaluate(puzzle, placements).hardwareCost >= context.best.cost) {
+      return;
+    }
+
+    const currentRow = Math.floor(currentIndex / puzzle.size);
+    const currentColumn = currentIndex % puzzle.size;
+    const orderedDirections = [...DIRECTIONS].sort((left, right) => {
+      const leftIndex = (currentRow + left.row) * puzzle.size + currentColumn + left.column;
+      const rightIndex = (currentRow + right.row) * puzzle.size + currentColumn + right.column;
+      return distance(puzzle, leftIndex, targetIndex) -
+        distance(puzzle, rightIndex, targetIndex);
+    });
+
+    for (const direction of orderedDirections) {
+      if (context.stopped) return;
+      const nextRow = currentRow + direction.row;
+      const nextColumn = currentColumn + direction.column;
+      if (
+        nextRow < 0 ||
+        nextRow >= puzzle.size ||
+        nextColumn < 0 ||
+        nextColumn >= puzzle.size
+      ) {
+        continue;
+      }
+
+      const nextIndex = nextRow * puzzle.size + nextColumn;
+      if (path.has(nextIndex) || isBlocked(puzzle, nextIndex, lockedEmptyIndices)) continue;
+
+      const currentPlacement = placements[currentIndex];
+      if (!currentPlacement) continue;
+      const currentOptions = currentPlacement.fixed === 'none'
+        ? existingPlacements?.[currentIndex]?.type
+          ? [currentPlacement]
+          : COMPONENT_OPTIONS
+          .filter((component) =>
+            component.arms.includes(direction.direction) &&
+            (incomingArm === null || component.arms.includes(incomingArm))
+          )
+          .map((component) => ({
+            type: component.type,
+            rotation: component.rotation,
+            fixed: 'none' as const,
+          }))
+        : [currentPlacement];
+
+      for (const currentOption of currentOptions) {
+        if (context.stopped) return;
+        const nextPlacements = placements.slice();
+        nextPlacements[currentIndex] = currentOption;
+        const evaluation = evaluate(puzzle, nextPlacements);
+        if (
+          !isEvaluationValid(evaluation, protectedReceiverIndices) ||
+          (context.best && evaluation.hardwareCost >= context.best.cost) ||
+          !canReachAllReceivers(puzzle, evaluation)
+        ) {
+          continue;
+        }
+        const currentArms = evaluation.connections.get(currentIndex) ?? [];
+        if (
+          !currentArms.includes(direction.direction) ||
+          (incomingArm !== null && !currentArms.includes(incomingArm))
+        ) {
+          continue;
+        }
+
+        const voltage = evaluation.voltages.get(currentIndex) ?? 0;
+        if (voltage <= 0) continue;
+        if (
+          !canReachReceiver(
+            puzzle,
+            evaluation,
+            targetIndex,
+            targetVoltage
+          )
+        ) {
+          continue;
+        }
+
+        if (
+          nextIndex === targetIndex &&
+          evaluation.receivers.some(
+            (receiver) => receiver.index === targetIndex && receiver.met
+          )
+        ) {
+          connectRemainingReceivers(nextPlacements);
+          continue;
+        }
+
+        const nextPath = new Set(path);
+        nextPath.add(nextIndex);
+        routeToReceiver(
+          nextIndex,
+          direction.opposite,
+          targetIndex,
+          targetVoltage,
+          nextPlacements,
+          nextPath,
+          protectedReceiverIndices
+        );
+      }
+    }
+  };
+
+  connectRemainingReceivers(initialPlacements);
+  return context.best?.placements ?? null;
+};
+
+
+=== FILE: src\client\sound.ts ===
+
+type Tone = {
+  frequency: number;
+  duration: number;
+  type: OscillatorType;
+  startOffset?: number;
+};
+
+let audioContext: AudioContext | undefined;
+let muted = false;
+let mutePreferenceLoaded = false;
+
+const loadMutePreference = (): void => {
+  if (mutePreferenceLoaded) return;
+  mutePreferenceLoaded = true;
+
+  try {
+    if (typeof window !== 'undefined') {
+      muted = window.sessionStorage.getItem('daily-circuit:sound-enabled') === 'false';
+    }
+  } catch (error) {
+    console.error('Unable to restore sound setting:', error);
+  }
+};
+
+export const isMuted = (): boolean => {
+  loadMutePreference();
+  return muted;
+};
+
+export const setMuted = (nextMuted: boolean): void => {
+  muted = nextMuted;
+  mutePreferenceLoaded = true;
+
+  try {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem('daily-circuit:sound-enabled', String(!nextMuted));
+    }
+  } catch (error) {
+    console.error('Unable to save sound setting:', error);
+  }
+};
+
+const getAudioContext = (): AudioContext | undefined => {
+  if (typeof window === 'undefined' || typeof window.AudioContext !== 'function') {
+    return undefined;
+  }
+
+  try {
+    audioContext ??= new window.AudioContext();
+    if (audioContext.state === 'suspended') {
+      void audioContext.resume().catch((error: unknown) => {
+        console.error('Unable to resume puzzle audio:', error);
+      });
+    }
+    return audioContext;
+  } catch (error) {
+    console.error('Unable to initialize puzzle audio:', error);
+    return undefined;
+  }
+};
+
+const playTones = (tones: Tone[], peakGain: number): void => {
+  if (isMuted()) return;
+
+  try {
+    const context = getAudioContext();
+    if (!context) return;
+
+    const startTime = context.currentTime;
+    for (const tone of tones) {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const start = startTime + (tone.startOffset ?? 0);
+      const end = start + tone.duration;
+
+      oscillator.type = tone.type;
+      oscillator.frequency.setValueAtTime(tone.frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peakGain, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(end + 0.015);
+    }
+  } catch (error) {
+    console.error('Unable to play puzzle sound:', error);
+  }
+};
+
+export const playPlace = (): void => {
+  playTones([{ frequency: 480, duration: 0.085, type: 'sine' }], 0.1);
+};
+
+export const playRotate = (): void => {
+  playTones([{ frequency: 680, duration: 0.11, type: 'triangle' }], 0.09);
+};
+
+export const playSurge = (): void => {
+  playTones(
+    [
+      { frequency: 190, duration: 0.18, type: 'sawtooth' },
+      { frequency: 380, duration: 0.16, type: 'triangle', startOffset: 0.045 },
+    ],
+    0.08
+  );
+};
+
+export const playWin = (): void => {
+  const notes = [523.25, 659.25, 783.99, 1046.5];
+  playTones(
+    notes.map((frequency, index) => ({
+      frequency,
+      duration: 0.22,
+      type: 'triangle',
+      startOffset: index * 0.12,
+    })),
+    0.11
+  );
+};
+
+
+=== FILE: src\client\splash.html ===
+
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <meta name="theme-color" content="#ffda57" />
+    <title>Daily Circuit â€” Puzzle Workbench</title>
+  </head>
+  <body class="h-full">
+    <div id="root" class="h-full"></div>
+    <script type="module" src="splash.tsx"></script>
+  </body>
+</html>
+
+
+=== FILE: src\client\splash.tsx ===
+
+import './game';
+
