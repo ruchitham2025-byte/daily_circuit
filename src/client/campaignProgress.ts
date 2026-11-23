@@ -40,7 +40,7 @@ const loadLocalProgress = (): CampaignProgressData => {
     if (isRecord(parsed.bestGrades)) {
       for (const [key, value] of Object.entries(parsed.bestGrades)) {
         const id = Number(key);
-        if (Number.isSafeInteger(id) && id >= 1 && id <= 30 && isGrade(value)) {
+        if (Number.isSafeInteger(id) && id >= 1 && id <= 50 && isGrade(value)) {
           bestGrades[id] = value;
         }
       }
@@ -49,9 +49,9 @@ const loadLocalProgress = (): CampaignProgressData => {
     let unlockedThrough = 0;
     const storedUnlocked = parsed.unlockedThrough;
     if (typeof storedUnlocked === 'number' && Number.isSafeInteger(storedUnlocked)) {
-      unlockedThrough = Math.max(0, Math.min(30, storedUnlocked));
+      unlockedThrough = Math.max(0, Math.min(50, storedUnlocked));
     } else {
-      for (let id = 1; id <= 30; id += 1) {
+      for (let id = 1; id <= 50; id += 1) {
         if (bestGrades[id] === undefined) break;
         unlockedThrough = id;
       }
@@ -97,7 +97,7 @@ export const refreshCampaignProgress = async (): Promise<void> => {
       typeof payload.unlockedThrough !== 'number' ||
       !Number.isSafeInteger(payload.unlockedThrough) ||
       payload.unlockedThrough < 0 ||
-      payload.unlockedThrough > 30 ||
+      payload.unlockedThrough > 50 ||
       !isRecord(payload.bestGrades)
     ) {
       throw new Error('Campaign progress response was invalid');
@@ -109,7 +109,7 @@ export const refreshCampaignProgress = async (): Promise<void> => {
       if (
         !Number.isSafeInteger(levelId) ||
         levelId < 1 ||
-        levelId > 30 ||
+        levelId > 50 ||
         !isGrade(grade)
       ) {
         throw new Error('Campaign progress contained an invalid best grade');

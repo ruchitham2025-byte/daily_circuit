@@ -848,5 +848,675 @@
       70,
       43
     ]
+  },
+  {
+    "id": 31,
+    "mode": "campaign",
+    "title": "OVERLOAD",
+    "date": "SECTOR 31",
+    "targetCost": 105,
+    "difficulty": "TIER 31",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 10,
+        "voltage": 3
+      },
+      {
+        "index": 16,
+        "voltage": 3
+      },
+      {
+        "index": 42,
+        "voltage": 3
+      }
+    ],
+    "boosters": [
+      26,
+      44,
+      32
+    ],
+    "walls": [
+      29,
+      40,
+      15,
+      38
+    ],
+    "hazards": [
+      30,
+      0,
+      63
+    ]
+  },
+  {
+    "id": 32,
+    "mode": "campaign",
+    "title": "FRACTURE",
+    "date": "SECTOR 32",
+    "targetCost": 80,
+    "difficulty": "TIER 32",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 61,
+        "voltage": 1
+      },
+      {
+        "index": 57,
+        "voltage": 4
+      },
+      {
+        "index": 39,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      49,
+      42,
+      41
+    ],
+    "walls": [
+      4,
+      32,
+      50,
+      10
+    ],
+    "hazards": [
+      14,
+      21,
+      16
+    ]
+  },
+  {
+    "id": 33,
+    "mode": "campaign",
+    "title": "MELTDOWN",
+    "date": "SECTOR 33",
+    "targetCost": 20,
+    "difficulty": "TIER 33",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 39,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      3,
+      0,
+      27,
+      51,
+      25
+    ],
+    "hazards": [
+      14,
+      16,
+      13
+    ]
+  },
+  {
+    "id": 34,
+    "mode": "campaign",
+    "title": "SHORT CIRCUIT",
+    "date": "SECTOR 34",
+    "targetCost": 105,
+    "difficulty": "TIER 34",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 40,
+        "voltage": 3
+      },
+      {
+        "index": 51,
+        "voltage": 3
+      },
+      {
+        "index": 18,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      44,
+      35,
+      42
+    ],
+    "walls": [
+      62,
+      33,
+      22,
+      53
+    ],
+    "hazards": [
+      15,
+      6,
+      61
+    ]
+  },
+  {
+    "id": 35,
+    "mode": "campaign",
+    "title": "BLACK HOLE",
+    "date": "SECTOR 35",
+    "targetCost": 265,
+    "difficulty": "TIER 35",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 31,
+        "voltage": 3
+      },
+      {
+        "index": 8,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      26,
+      29,
+      25
+    ],
+    "walls": [
+      51,
+      17,
+      7,
+      55
+    ],
+    "hazards": [
+      63,
+      2,
+      50
+    ]
+  },
+  {
+    "id": 36,
+    "mode": "campaign",
+    "title": "SUPERNOVA",
+    "date": "SECTOR 36",
+    "targetCost": 85,
+    "difficulty": "TIER 36",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 11,
+        "voltage": 4
+      },
+      {
+        "index": 50,
+        "voltage": 4
+      },
+      {
+        "index": 54,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      42,
+      37,
+      19
+    ],
+    "walls": [
+      0,
+      21,
+      60,
+      6
+    ],
+    "hazards": [
+      56,
+      61,
+      16
+    ]
+  },
+  {
+    "id": 37,
+    "mode": "campaign",
+    "title": "CASCADE",
+    "date": "SECTOR 37",
+    "targetCost": 185,
+    "difficulty": "TIER 37",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 60,
+        "voltage": 2
+      },
+      {
+        "index": 59,
+        "voltage": 3
+      },
+      {
+        "index": 50,
+        "voltage": 4
+      }
+    ],
+    "boosters": [
+      43,
+      42,
+      34
+    ],
+    "walls": [
+      9,
+      13,
+      6,
+      62
+    ],
+    "hazards": [
+      12,
+      2,
+      10
+    ]
+  },
+  {
+    "id": 38,
+    "mode": "campaign",
+    "title": "VORTEX",
+    "date": "SECTOR 38",
+    "targetCost": 20,
+    "difficulty": "TIER 38",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 60,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      33,
+      27,
+      29,
+      26,
+      19
+    ],
+    "hazards": [
+      2,
+      62,
+      16
+    ]
+  },
+  {
+    "id": 39,
+    "mode": "campaign",
+    "title": "SPECTRUM",
+    "date": "SECTOR 39",
+    "targetCost": 20,
+    "difficulty": "TIER 39",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 60,
+        "voltage": 2
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      39,
+      63,
+      15,
+      22,
+      33
+    ],
+    "hazards": [
+      50,
+      38,
+      20
+    ]
+  },
+  {
+    "id": 40,
+    "mode": "campaign",
+    "title": "OBELISK",
+    "date": "SECTOR 40",
+    "targetCost": 30,
+    "difficulty": "TIER 40",
+    "size": 8,
+    "source": 36,
+    "targets": [
+      {
+        "index": 32,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      52,
+      46,
+      16,
+      15,
+      39
+    ],
+    "hazards": [
+      1,
+      62,
+      50
+    ]
+  },
+  {
+    "id": 41,
+    "mode": "campaign",
+    "title": "TITANIUM",
+    "date": "SECTOR 41",
+    "targetCost": 225,
+    "difficulty": "TIER 41",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 14,
+        "voltage": 3
+      },
+      {
+        "index": 66,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      22,
+      39,
+      31
+    ],
+    "walls": [
+      18,
+      4,
+      77,
+      30
+    ],
+    "hazards": [
+      54,
+      60,
+      62
+    ]
+  },
+  {
+    "id": 42,
+    "mode": "campaign",
+    "title": "MAELSTROM",
+    "date": "SECTOR 42",
+    "targetCost": 30,
+    "difficulty": "TIER 42",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 36,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      26,
+      3,
+      15,
+      68,
+      34
+    ],
+    "hazards": [
+      43,
+      74,
+      23
+    ]
+  },
+  {
+    "id": 43,
+    "mode": "campaign",
+    "title": "GALAXY",
+    "date": "SECTOR 43",
+    "targetCost": 90,
+    "difficulty": "TIER 43",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 27,
+        "voltage": 3
+      },
+      {
+        "index": 8,
+        "voltage": 1
+      }
+    ],
+    "boosters": [
+      29,
+      32,
+      34
+    ],
+    "walls": [
+      26,
+      24,
+      2,
+      12
+    ],
+    "hazards": [
+      14,
+      70,
+      71
+    ]
+  },
+  {
+    "id": 44,
+    "mode": "campaign",
+    "title": "PRISM",
+    "date": "SECTOR 44",
+    "targetCost": 380,
+    "difficulty": "TIER 44",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 4,
+        "voltage": 1
+      },
+      {
+        "index": 69,
+        "voltage": 2
+      }
+    ],
+    "boosters": [
+      50,
+      49,
+      30
+    ],
+    "walls": [
+      22,
+      37,
+      11,
+      45
+    ],
+    "hazards": [
+      53,
+      34,
+      80
+    ]
+  },
+  {
+    "id": 45,
+    "mode": "campaign",
+    "title": "AURORA",
+    "date": "SECTOR 45",
+    "targetCost": 30,
+    "difficulty": "TIER 45",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 36,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      7,
+      10,
+      71,
+      35,
+      3
+    ],
+    "hazards": [
+      9,
+      76,
+      0
+    ]
+  },
+  {
+    "id": 46,
+    "mode": "campaign",
+    "title": "ECLIPSE",
+    "date": "SECTOR 46",
+    "targetCost": 30,
+    "difficulty": "TIER 46",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 4,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      0,
+      33,
+      26,
+      54,
+      1
+    ],
+    "hazards": [
+      74,
+      77,
+      17
+    ]
+  },
+  {
+    "id": 47,
+    "mode": "campaign",
+    "title": "MERIDIAN",
+    "date": "SECTOR 47",
+    "targetCost": 30,
+    "difficulty": "TIER 47",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 36,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      54,
+      55,
+      65,
+      9,
+      70
+    ],
+    "hazards": [
+      69,
+      53,
+      50
+    ]
+  },
+  {
+    "id": 48,
+    "mode": "campaign",
+    "title": "INFERNO",
+    "date": "SECTOR 48",
+    "targetCost": 290,
+    "difficulty": "TIER 48",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 79,
+        "voltage": 1
+      },
+      {
+        "index": 72,
+        "voltage": 1
+      }
+    ],
+    "boosters": [
+      46,
+      51,
+      48
+    ],
+    "walls": [
+      54,
+      15,
+      13,
+      52
+    ],
+    "hazards": [
+      76,
+      36,
+      34
+    ]
+  },
+  {
+    "id": 49,
+    "mode": "campaign",
+    "title": "ZENITH",
+    "date": "SECTOR 49",
+    "targetCost": 30,
+    "difficulty": "TIER 49",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 36,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      76,
+      34,
+      3,
+      66,
+      21
+    ],
+    "hazards": [
+      57,
+      67,
+      59
+    ]
+  },
+  {
+    "id": 50,
+    "mode": "campaign",
+    "title": "ASCENSION",
+    "date": "SECTOR 50",
+    "targetCost": 30,
+    "difficulty": "TIER 50",
+    "size": 9,
+    "source": 40,
+    "targets": [
+      {
+        "index": 4,
+        "voltage": 1
+      }
+    ],
+    "boosters": [],
+    "walls": [
+      78,
+      79,
+      42,
+      11,
+      50
+    ],
+    "hazards": [
+      43,
+      61,
+      27
+    ]
   }
 ]

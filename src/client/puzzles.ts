@@ -1,7 +1,26 @@
 import catalog from './sectors.json' with { type: 'json' };
 import type { Puzzle } from './rules.ts';
-export const DAILY_LEVEL_ID = 31;
-export const CAMPAIGN_LEVEL_COUNT = 30;
+export const DAILY_LEVEL_ID = 51;
+export const CAMPAIGN_LEVEL_COUNT = 50;
+
+export type Chapter = {
+  id: number;
+  title: string;
+  subtitle: string;
+  startLevel: number;
+  endLevel: number;
+};
+
+export const CHAPTERS: readonly Chapter[] = [
+  { id: 1, title: 'BOOT PROTOCOL', subtitle: 'Learn the ropes', startLevel: 1, endLevel: 10 },
+  { id: 2, title: 'POWER SURGE', subtitle: 'Boosters & splitters', startLevel: 11, endLevel: 20 },
+  { id: 3, title: 'DEEP CIRCUIT', subtitle: 'Complex routing', startLevel: 21, endLevel: 30 },
+  { id: 4, title: 'HIGH VOLTAGE', subtitle: 'Master class', startLevel: 31, endLevel: 40 },
+  { id: 5, title: 'FINAL FRONTIER', subtitle: 'Elite tier', startLevel: 41, endLevel: 50 },
+];
+
+export const getChapterForLevel = (levelId: number): Chapter | undefined =>
+  CHAPTERS.find((c) => levelId >= c.startLevel && levelId <= c.endLevel);
 export type DailyLevel = Puzzle & {
   id: number;
   mode: 'daily' | 'campaign';
@@ -100,4 +119,4 @@ export function dailyLayout(now = new Date()) {
 }
 export const getDailyLevel = (now = new Date()) => dailyLayout(now).level;
 export const getLevelById = (id: number) =>
-  id === 31 ? getDailyLevel() : sectors.find((l) => l.id === id);
+  id === 51 ? getDailyLevel() : sectors.find((l) => l.id === id);
