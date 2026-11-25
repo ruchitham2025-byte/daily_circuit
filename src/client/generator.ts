@@ -434,7 +434,8 @@ const createDailyLayout = (
   const center = Math.floor(size / 2);
   const source = position(size, center, center);
 
-  const targetCount = 2 + Math.floor(random() * 2);
+  const targetCount =
+    difficulty >= 31 ? 3 : 2 + Math.floor(random() * 2);
   const targets: number[] = [];
   const targetPositions = new Set<number>([source]);
   let attempts = 0;
@@ -596,7 +597,17 @@ const createDailyLayout = (
   const solutionParts = solution.filter(
     (placement) => placement.fixed === 'none' && placement.type > 0
   ).length;
-  if (solutionParts < 7 || solvedEvaluation.hardwareCost < 85) return null;
+  const minimumParts =
+    difficulty < 11 ? 4 : difficulty < 21 ? 6 : difficulty < 31 ? 7 : 9;
+  const minimumCost =
+    difficulty < 11 ? 45 : difficulty < 21 ? 75 : difficulty < 31 ? 90 : difficulty < 41 ? 120 : 150;
+  if (
+    solutionParts < minimumParts ||
+    solvedEvaluation.hardwareCost < minimumCost ||
+    solvedEvaluation.receivers.length < (difficulty >= 31 ? 3 : 2)
+  ) {
+    return null;
+  }
 
   return {
     ...puzzle,
@@ -617,8 +628,8 @@ export const generate = (
   if (!Number.isInteger(size) || size < MIN_SIZE || size > MAX_SIZE) {
     throw new Error(`Size must be an integer from ${MIN_SIZE} to ${MAX_SIZE}.`);
   }
-  if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 30) {
-    throw new Error('Difficulty must be an integer from 1 to 30.');
+  if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 50) {
+    throw new Error('Difficulty must be an integer from 1 to 50.');
   }
 
   const dailyAttempts = MAX_ATTEMPTS * 3;
@@ -634,7 +645,10 @@ export const generate = (
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     const random = seededRandom(seed + attempt * 0x9e3779b9 + 0x12345);
-    const level = createLessonLayout(seed, size, difficulty, random);
+    const level =
+      difficulty >= 6
+        ? createDailyLayout(seed, size, difficulty, random)
+        : createLessonLayout(seed, size, difficulty, random);
     if (level) return level;
   }
   return null;

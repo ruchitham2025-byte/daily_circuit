@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { evaluate } from '../src/client/rules.ts';
-import { solve } from '../src/client/solver.ts';
+import { solve, solveDetailed } from '../src/client/solver.ts';
 
 test('solver returns a valid minimum-cost straight route', () => {
   const puzzle = {
@@ -20,6 +20,24 @@ test('solver returns a valid minimum-cost straight route', () => {
   assert.equal(result.receivers.every((receiver) => receiver.met), true);
   assert.equal(result.hazardPowered, false);
   assert.equal(result.totalCost, 10);
+});
+
+test('solver proves the optimum for a corridor with no alternate route', () => {
+  const puzzle = {
+    size: 3,
+    source: 0,
+    targets: [{ index: 2, voltage: 3 }],
+    boosters: [],
+    walls: [3, 4, 5, 6, 7, 8],
+    hazards: [],
+  };
+
+  const outcome = solveDetailed(puzzle);
+
+  assert.equal(outcome.optimal, true);
+  assert.equal(outcome.cost, 10);
+  assert.ok(outcome.placements);
+  assert.equal(evaluate(puzzle, outcome.placements).receivers.every((receiver) => receiver.met), true);
 });
 
 test('solver preserves existing placements while routing the remaining circuit', () => {

@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import type { Placement, PuzzleEvaluation } from './rules';
 import type { DailyLevel } from './puzzles';
 import { Part, Device } from './parts';
@@ -13,28 +14,53 @@ export function Board({
   result: PuzzleEvaluation;
   onCell: (i: number) => void;
 }) {
+  const activePointer = useRef<{ id: number; lastCell: number } | null>(null);
   return (
     <div className="chassis">
       <div className="machine-label">
-        <i /> DC–06 <span>POWER ROUTING UNIT</span>
+        <i />
+        <span>DC-06 POWER ROUTING UNIT</span>
         <i />
       </div>
       <div
-        className="sockets"
+        className={`sockets ${result.hazardPowered ? 'overloaded' : ''}`}
         style={{
           gridTemplateColumns: `repeat(${level.size},minmax(0,1fr))`,
           gridTemplateRows: `repeat(${level.size},minmax(0,1fr))`,
         }}
+        onPointerUp={(event) => {
+          if (activePointer.current?.id === event.pointerId) {
+            activePointer.current = null;
+          }
+        }}
+        onPointerCancel={() => {
+          activePointer.current = null;
+        }}
       >
         {grid.map((p, i) => {
           const live = (result.voltages.get(i) ?? 0) > 0;
-          const receiver = level.targets.find((r) => r.index === i);
+          const receiver = result.receivers.find((r) => r.index === i);
           return (
             <button
               key={i}
-              onClick={() => onCell(i)}
-              className={`socket ${p.fixed} ${p.type && p.fixed === 'none' ? 'fitted' : ''} ${live ? 'energized' : ''}`}
-              aria-label={`${String.fromCharCode(65 + Math.floor(i / level.size))}${1 + (i % level.size)}: ${p.fixed === 'none' ? (p.type ? names[p.type] : 'empty socket') : p.fixed}${receiver ? ` needs ${receiver.voltage} volts` : ''}`}
+              data-cell={i}
+              onPointerDown={(event) => {
+                if (!event.isPrimary || event.button !== 0) return;
+                event.preventDefault();
+                activePointer.current = { id: event.pointerId, lastCell: i };
+                onCell(i);
+              }}
+              onPointerEnter={(event) => {
+                const pointer = activePointer.current;
+                if (!pointer || pointer.id !== event.pointerId || pointer.lastCell === i) return;
+                pointer.lastCell = i;
+                onCell(i);
+              }}
+              onClick={(event) => {
+                if (event.detail === 0) onCell(i);
+              }}
+              className={`socket ${p.fixed} ${p.type && p.fixed === 'none' ? 'fitted' : ''} ${live ? 'energized' : ''} ${receiver?.met ? 'receiver-charged' : ''}`}
+              aria-label={`${String.fromCharCode(65 + Math.floor(i / level.size))}${1 + (i % level.size)}: ${p.fixed === 'none' ? (p.type ? names[p.type] ?? 'part' : 'empty socket') : p.fixed}${receiver ? ` needs ${receiver.requiredVoltage} volts` : ''}`}
             >
               {p.fixed === 'none' ? (
                 p.type ? (
@@ -57,7 +83,7 @@ export function Board({
                     {p.fixed === 'source'
                       ? '5V'
                       : p.fixed === 'target'
-                        ? `${receiver?.voltage}V`
+                        ? `${receiver?.requiredVoltage ?? 0}V`
                         : p.fixed === 'booster'
                           ? '+5V'
                           : '!'}

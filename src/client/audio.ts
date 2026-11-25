@@ -50,8 +50,6 @@ export const playSound = (sound: Sound): void => {
     }
 
     const now = context.currentTime;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
     const soundSettings: Record<Sound, { frequency: number; duration: number; type: OscillatorType }> = {
       place: { frequency: 420, duration: 0.07, type: 'sine' },
       rotate: { frequency: 620, duration: 0.09, type: 'triangle' },
@@ -63,25 +61,30 @@ export const playSound = (sound: Sound): void => {
     };
     const settings = soundSettings[sound];
 
-    oscillator.type = settings.type;
-    oscillator.frequency.setValueAtTime(settings.frequency, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + settings.duration);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
     if (sound === 'win') {
-      const notes = [523.25, 659.25, 783.99, 1046.5];
-      oscillator.frequency.setValueAtTime(notes[0] ?? 523.25, now);
-      for (let index = 1; index < notes.length; index += 1) {
-        const note = notes[index];
-        if (note !== undefined) {
-          oscillator.frequency.setValueAtTime(note, now + index * 0.11);
-        }
-      }
-      oscillator.start(now);
-      oscillator.stop(now + settings.duration);
+      [523.25, 659.25, 783.99].forEach((frequency) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = settings.type;
+        oscillator.frequency.setValueAtTime(frequency, now);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.07, now + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + settings.duration);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(now);
+        oscillator.stop(now + settings.duration + 0.02);
+      });
     } else {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = settings.type;
+      oscillator.frequency.setValueAtTime(settings.frequency, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + settings.duration);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
       if (sound === 'receiver') {
         oscillator.frequency.exponentialRampToValueAtTime(
           settings.frequency * 1.25,

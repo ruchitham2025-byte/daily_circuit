@@ -22,7 +22,7 @@ const DAILY_KEY_TTL_SECONDS = 14 * 24 * 60 * 60;
 const MAX_HARDWARE_COST = 10_000;
 const MAX_PARTS = 49;
 const MAX_DURATION_SECONDS = 24 * 60 * 60;
-const CAMPAIGN_LEVEL_COUNT = 30;
+const CAMPAIGN_LEVEL_COUNT = 50;
 const GRADE_ORDER: Grade[] = ['S', 'A', 'B', 'C'];
 
 export const api = new Hono();

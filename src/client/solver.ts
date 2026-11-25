@@ -25,6 +25,12 @@ export type SolverOptions = {
   lockedEmptyIndices?: readonly number[];
 };
 
+export type SolverOutcome = {
+  placements: Placement[] | null;
+  cost: number | null;
+  optimal: boolean;
+};
+
 const COMPONENT_OPTIONS = [1, 2, 3]
   .flatMap((type) =>
     Array.from({ length: 4 }, (_, rotation) => ({ type, rotation }))
@@ -53,6 +59,119 @@ const COMPONENT_OPTIONS = [1, 2, 3]
     };
   })
   .sort((left, right) => left.cost - right.cost);
+
+const solveForcedTree = (puzzle: Puzzle): SolverOutcome | null => {
+  const cellCount = puzzle.size * puzzle.size;
+  const blocked = new Set([...puzzle.walls, ...puzzle.hazards]);
+  const openIndices = Array.from({ length: cellCount }, (_, index) => index).filter(
+    (index) => !blocked.has(index)
+  );
+  const open = new Set(openIndices);
+  if (!open.has(puzzle.source)) return null;
+
+  const neighbors = new Map<number, number[]>();
+  let edgeCount = 0;
+  for (const index of openIndices) {
+    const row = Math.floor(index / puzzle.size);
+    const column = index % puzzle.size;
+    const adjacentIndices = DIRECTIONS.flatMap((direction) => {
+      const nextRow = row + direction.row;
+      const nextColumn = column + direction.column;
+      if (
+        nextRow < 0 ||
+        nextRow >= puzzle.size ||
+        nextColumn < 0 ||
+        nextColumn >= puzzle.size
+      ) {
+        return [];
+      }
+      const nextIndex = nextRow * puzzle.size + nextColumn;
+      return open.has(nextIndex) ? [nextIndex] : [];
+    });
+    neighbors.set(index, adjacentIndices);
+    edgeCount += adjacentIndices.length;
+  }
+  edgeCount /= 2;
+  if (edgeCount !== openIndices.length - 1) return null;
+
+  const parents = new Map<number, number | null>([[puzzle.source, null]]);
+  const queue = [puzzle.source];
+  for (let offset = 0; offset < queue.length; offset += 1) {
+    const current = queue[offset];
+    if (current === undefined) continue;
+    for (const next of neighbors.get(current) ?? []) {
+      if (parents.has(next)) continue;
+      parents.set(next, current);
+      queue.push(next);
+    }
+  }
+  if (parents.size !== openIndices.length) return null;
+
+  const requiredNodes = new Set<number>([puzzle.source]);
+  const requiredEdges = new Set<string>();
+  for (const target of puzzle.targets) {
+    if (!open.has(target.index)) return null;
+    let current = target.index;
+    requiredNodes.add(current);
+    while (current !== puzzle.source) {
+      const parent = parents.get(current);
+      if (parent === undefined || parent === null) return null;
+      requiredEdges.add(`${Math.min(current, parent)}:${Math.max(current, parent)}`);
+      current = parent;
+      requiredNodes.add(current);
+    }
+  }
+  if (requiredNodes.size !== openIndices.length || requiredEdges.size !== edgeCount) {
+    return null;
+  }
+
+  const placements = createInitialPlacements(puzzle);
+  for (const index of openIndices) {
+    if (
+      index === puzzle.source ||
+      puzzle.targets.some((target) => target.index === index) ||
+      puzzle.boosters.includes(index)
+    ) {
+      continue;
+    }
+
+    const row = Math.floor(index / puzzle.size);
+    const column = index % puzzle.size;
+    const arms = DIRECTIONS.flatMap((direction) => {
+      const nextRow = row + direction.row;
+      const nextColumn = column + direction.column;
+      if (nextRow < 0 || nextRow >= puzzle.size || nextColumn < 0 || nextColumn >= puzzle.size) {
+        return [];
+      }
+      const nextIndex = nextRow * puzzle.size + nextColumn;
+      return open.has(nextIndex) ? [direction.direction] : [];
+    });
+    const component = COMPONENT_OPTIONS.find(
+      (option) =>
+        option.arms.length === arms.length &&
+        option.arms.every((arm) => arms.includes(arm))
+    );
+    if (!component) return null;
+    placements[index] = {
+      type: component.type,
+      rotation: component.rotation,
+      fixed: 'none',
+    };
+  }
+
+  const evaluation = evaluate(puzzle, placements);
+  if (
+    evaluation.receivers.some((receiver) => !receiver.met) ||
+    evaluation.hazardPowered
+  ) {
+    return null;
+  }
+  return {
+    placements,
+    cost: evaluation.hardwareCost,
+    optimal: true,
+  };
+};
 
 const createInitialPlacements = (
   puzzle: Puzzle,
@@ -137,13 +256,18 @@ const isEvaluationValid = (
     evaluation.receivers.some((receiver) => receiver.index === index && receiver.met)
   );
 
-export const solve = (
+export const solveDetailed = (
   puzzle: Puzzle,
   existingPlacements?: readonly Placement[],
   options: SolverOptions = {}
-): Placement[] | null => {
-  const timeLimitMs = options.timeLimitMs ?? SEARCH_TIME_LIMIT_MS;
+): SolverOutcome => {
   const lockedEmptyIndices = new Set(options.lockedEmptyIndices ?? []);
+  if (!existingPlacements && lockedEmptyIndices.size === 0) {
+    const forcedTree = solveForcedTree(puzzle);
+    if (forcedTree) return forcedTree;
+  }
+
+  const timeLimitMs = options.timeLimitMs ?? SEARCH_TIME_LIMIT_MS;
   const context: SearchContext = {
     deadline: Date.now() + timeLimitMs,
     best: null,
@@ -309,5 +433,16 @@ export const solve = (
   };
 
   connectRemainingReceivers(initialPlacements);
-  return context.best?.placements ?? null;
+  return {
+    placements: context.best?.placements ?? null,
+    cost: context.best?.cost ?? null,
+    optimal: !context.stopped,
+  };
 };
+
+export const solve = (
+  puzzle: Puzzle,
+  existingPlacements?: readonly Placement[],
+  options: SolverOptions = {}
+): Placement[] | null =>
+  solveDetailed(puzzle, existingPlacements, options).placements;

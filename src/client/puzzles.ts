@@ -1,7 +1,5 @@
 import catalog from './sectors.json' with { type: 'json' };
 import type { Puzzle } from './rules.ts';
-export const DAILY_LEVEL_ID = 51;
-export const CAMPAIGN_LEVEL_COUNT = 50;
 
 export type Chapter = {
   id: number;
@@ -21,6 +19,8 @@ export const CHAPTERS: readonly Chapter[] = [
 
 export const getChapterForLevel = (levelId: number): Chapter | undefined =>
   CHAPTERS.find((c) => levelId >= c.startLevel && levelId <= c.endLevel);
+export const CAMPAIGN_LEVEL_COUNT = 50;
+export const DAILY_LEVEL_ID = CAMPAIGN_LEVEL_COUNT + 1;
 export type DailyLevel = Puzzle & {
   id: number;
   mode: 'daily' | 'campaign';
@@ -65,7 +65,12 @@ export function dailyLayout(now = new Date()) {
   );
   for (let i = available.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
-    [available[i], available[j]] = [available[j]!, available[i]!];
+    const current = available[i];
+    const swap = available[j];
+    if (current !== undefined && swap !== undefined) {
+      available[i] = swap;
+      available[j] = current;
+    }
   }
   const fixed = [12, 15, 27, top, bottom];
   const hazards = available
@@ -80,7 +85,7 @@ export function dailyLayout(now = new Date()) {
     .slice(0, 2);
   const level: DailyLevel = {
     size: 6,
-    id: 31,
+    id: DAILY_LEVEL_ID,
     title: 'Daily Circuit',
     mode: 'daily',
     date: now.toISOString().slice(0, 10),
@@ -101,13 +106,16 @@ export function dailyLayout(now = new Date()) {
   const directions = (a: number, b: number) =>
     b === a - 6 ? 0 : b === a + 1 ? 1 : b === a + 6 ? 2 : 3;
   const solution = new Map<number, { type: number; rotation: number }>();
-  for (const path of [upper, lower])
+  for (const path of [upper, lower]) {
     for (let j = 1; j < path.length - 1; j++) {
-      const i = path[j]!;
+      const i = path[j];
+      const previous = path[j - 1];
+      const next = path[j + 1];
+      if (i === undefined || previous === undefined || next === undefined) continue;
       if (fixed.includes(i)) continue;
-      const cell = transform(i),
-        a = directions(cell, transform(path[j - 1]!)),
-        b = directions(cell, transform(path[j + 1]!));
+      const cell = transform(i);
+      const a = directions(cell, transform(previous));
+      const b = directions(cell, transform(next));
       const straight = Math.abs(a - b) === 2;
       solution.set(cell, {
         type: straight ? 1 : 2,
@@ -115,8 +123,9 @@ export function dailyLayout(now = new Date()) {
       });
       level.targetCost += straight ? 10 : 15;
     }
+  }
   return { level, solution };
 }
 export const getDailyLevel = (now = new Date()) => dailyLayout(now).level;
 export const getLevelById = (id: number) =>
-  id === 51 ? getDailyLevel() : sectors.find((l) => l.id === id);
+  id === DAILY_LEVEL_ID ? getDailyLevel() : sectors.find((l) => l.id === id);

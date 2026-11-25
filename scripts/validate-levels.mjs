@@ -1,15 +1,20 @@
 import { generate } from '../src/client/generator.ts';
+import { getCampaignLevels } from '../src/client/puzzles.ts';
 import { evaluate } from '../src/client/rules.ts';
 
 const campaignSize = (level) =>
   level <= 5 ? 5 : Math.min(10, 5 + Math.floor((level - 6) / 5));
 const difficultySize = (difficulty) => Math.min(10, 5 + Math.floor((difficulty - 1) / 5));
 const dailySeedStart = Math.floor(Date.now() / 86_400_000);
+const campaignLevelsById = new Map(
+  getCampaignLevels().map((level) => [level.id, level])
+);
 const levelsToValidate = [
-  ...Array.from({ length: 30 }, (_, index) => {
+  ...Array.from({ length: 50 }, (_, index) => {
     const level = index + 1;
     return {
       label: `campaign ${level}`,
+      campaignId: level,
       seed: 0x44430000 + level,
       size: campaignSize(level),
       difficulty: level,
@@ -44,7 +49,21 @@ for (const level of levelsToValidate) {
     evaluation.receivers.every((receiver) => receiver.met) &&
     !evaluation.hazardPowered &&
     evaluation.hardwareCost === generated.targetCost;
-  if (!valid) {
+  const catalogLevel = level.campaignId
+    ? campaignLevelsById.get(level.campaignId)
+    : undefined;
+  const isGeneratedExtension =
+    level.campaignId !== undefined && level.campaignId >= 31;
+  const matchesCatalog =
+    !isGeneratedExtension ||
+    (catalogLevel !== undefined &&
+      catalogLevel.source === generated.source &&
+      catalogLevel.targetCost === generated.targetCost &&
+      JSON.stringify(catalogLevel.targets) === JSON.stringify(generated.targets) &&
+      JSON.stringify(catalogLevel.boosters) === JSON.stringify(generated.boosters) &&
+      JSON.stringify(catalogLevel.walls) === JSON.stringify(generated.walls) &&
+      JSON.stringify(catalogLevel.hazards) === JSON.stringify(generated.hazards));
+  if (!valid || !matchesCatalog) {
     console.error(`FAIL ${level.label}: generated solution did not validate.`);
     failures += 1;
     continue;
